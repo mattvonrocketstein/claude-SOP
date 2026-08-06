@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """csop -- the CSOP shared hook substrate + toggle CLI.
 
-Domain-agnostic machinery used by every discipline gate and the CLI:
-  * event parsing that FAILS OPEN (a bug here can never brick a tool call)
-  * project-level activation STATE (which discipline CODENAMES are active) in a
-    single active.json under ${CLAUDE_PLUGIN_DATA} or .claude/csop-state
-  * the project CONFIG-override loader (.claude/csop.json)
-  * the escape-hatch convention (CSOP_<NAME>=off)
-  * enforcement primitives: allow / block / nudge / ask / deny
-
-This file knows NOTHING about specific disciplines -- those are singleton
-classes in `disciplines.py` (identity + default properties in code). csop only
-handles activation state, the config-override file, and the enforce protocol.
+Domain-agnostic machinery for every gate and the CLI: fail-open event parsing,
+project-level activation state, the `.claude/csop.json` override loader, the
+`CSOP_<name>=off` escape hatch, and the enforcement primitives allow / block /
+nudge / ask / deny. It knows nothing about specific disciplines, which are
+singleton classes in `disciplines.py`.
 """
+import fnmatch
 import json
 import os
+import re
 import sys
 
 
@@ -22,7 +18,7 @@ import sys
 
 def load_event():
     try:
-        return json.load(sys.stdin)
+        return json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except Exception:
         return {}
 
@@ -41,10 +37,10 @@ def _state_dir():
 
 
 def _state_path():
-    # ONE project-level file, NOT session-keyed: the CLI (run by the model via
-    # Bash) doesn't receive CLAUDE_SESSION_ID, so a session key made the CLI and
-    # the hooks disagree. "Active until /clear" is preserved by the SessionStart
-    # reset re-seeding this file, not by keying on the session.
+    """The active-discipline state file: project-level, never session-keyed. The
+    CLI runs as Bash and so never receives CLAUDE_SESSION_ID, and a session key
+    made the CLI and the hooks disagree. Sticky-latch semantics survive that
+    because the SessionStart reset re-seeds this file on /clear."""
     return os.path.join(_state_dir(), "active.json")
 
 
@@ -55,7 +51,7 @@ def state_path(name):
 
 
 def active():
-    """The set of active discipline CODENAMES (project-level)."""
+    """The set of active discipline codenames (project-level)."""
     try:
         with open(_state_path()) as f:
             return set(json.load(f))
@@ -68,7 +64,7 @@ def is_active(codename):
 
 
 def enable(codename):
-    """Add an already-resolved CODENAME to the active set."""
+    """Add an already-resolved codename to the active set."""
     os.makedirs(_state_dir(), exist_ok=True)
     cur = active()
     cur.add(codename)
@@ -83,6 +79,36 @@ def reset(codenames):
     os.makedirs(_state_dir(), exist_ok=True)
     with open(_state_path(), "w") as f:
         json.dump(sorted(codenames), f)
+
+
+# ---- one-time notices (surfaced once by the Stop hook, then drained) --------
+
+def push_notice(text):
+    """Queue a one-time notice for the Stop hook (modeline) to surface once."""
+    path = state_path("notices.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        data = []
+    if text not in data:
+        data.append(text)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+
+def drain_notices():
+    """Return queued notices and clear them (shown at most once)."""
+    path = state_path("notices.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        data = []
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return data
 
 
 # ---- project config override -----------------------------------------------
@@ -150,7 +176,7 @@ def loads_jsonc(text):
 def project_config():
     """The project's `.claude/csop.json` override: a dict keyed by codename ->
     {param: value}; {} if absent or unparseable. Parsed as JSON-with-comments
-    (see loads_jsonc). A discipline honors it only for its OVERRIDABLE params
+    (see loads_jsonc). A discipline honors it only for its overridable params
     (see disciplines.py) -- identity/description live in code, never here."""
     proj = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     try:
@@ -160,10 +186,263 @@ def project_config():
         return {}
 
 
+# ---- stages (session-level current stage + per-stage policy) ---------------
+
+def stages_config():
+    """The top-level `stages` block from .claude/csop.json (a reserved key, not a
+    codename): {name: {globs, from, disciplines, pre, post, default_stage}}. {} if
+    absent or malformed."""
+    cfg = project_config().get("stages")
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _stage_path():
+    return state_path("stage.json")
+
+
+def _stage_state():
+    try:
+        with open(_stage_path()) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def current_stage():
+    """The session's current stage name, or None. A sticky latch: seeded from a
+    stage's default_stage at SessionStart, changed by `csop.py stage <name>`."""
+    return _stage_state().get("current")
+
+
+def stage_history():
+    """The stages that have been current this session, in first-seen order."""
+    h = _stage_state().get("history")
+    return h if isinstance(h, list) else []
+
+
+def set_stage(name):
+    """Make `name` the current stage and record it in the session history."""
+    st = _stage_state()
+    hist = st.get("history") if isinstance(st.get("history"), list) else []
+    if name and name not in hist:
+        hist.append(name)
+    st["current"], st["history"] = name, hist
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_stage_path(), "w") as f:
+        json.dump(st, f)
+    return name
+
+
+def stage_pre_fired(name):
+    """True if stage `name`'s `pre` prompt has already fired this session."""
+    return name in (_stage_state().get("pre_fired") or [])
+
+
+def mark_stage_pre(name):
+    """Record that stage `name`'s `pre` prompt fired (dedup, once per session)."""
+    st = _stage_state()
+    pf = st.get("pre_fired") if isinstance(st.get("pre_fired"), list) else []
+    if name not in pf:
+        pf.append(name)
+    st["pre_fired"] = pf
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_stage_path(), "w") as f:
+        json.dump(st, f)
+
+
+def stage_successors(name):
+    """Stages that list `name` as a `from` source: the forward edges out of `name`.
+    One successor is the ladder case; several is a DAG branch."""
+    return [s for s, cfg in stages_config().items()
+            if isinstance(cfg, dict) and name in (cfg.get("from") or [])]
+
+
+def default_stage():
+    """The stage whose config sets default_stage true (first wins), or None."""
+    for name, cfg in stages_config().items():
+        if isinstance(cfg, dict) and cfg.get("default_stage"):
+            return name
+    return None
+
+
+def seed_stage():
+    """SessionStart: set the current stage to the configured default (or none)
+    and start a fresh history."""
+    os.makedirs(_state_dir(), exist_ok=True)
+    d = default_stage()
+    with open(_stage_path(), "w") as f:
+        json.dump({"current": d, "history": [d] if d else []}, f)
+    return d
+
+
+def stage_of(path):
+    """Advisory glob-membership: the first stage whose globs match `path` (config
+    order), or None. Used for mismatch warnings and the from-DAG, never to pick the
+    current stage."""
+    p = (path or "").replace("\\", "/")
+    if not p:
+        return None
+    for name, cfg in stages_config().items():
+        globs = cfg.get("globs", []) if isinstance(cfg, dict) else []
+        for g in globs or []:
+            if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(p, "*/" + g):
+                return name
+    return None
+
+
+def _match_globs(path, globs):
+    p = (path or "").replace("\\", "/")
+    for g in globs or []:
+        if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(p, "*/" + g):
+            return True
+    return False
+
+
+def _stage_ancestors(name, cfg, seen):
+    for src in (cfg.get(name, {}) or {}).get("from", []) or []:
+        if src not in seen:
+            seen.add(src)
+            _stage_ancestors(src, cfg, seen)
+    return seen
+
+
+def writable_globs(name):
+    """The globs stage `name` may write: its explicit `writable` list if set, else
+    the union of `globs` over the stage and its transitive `from` ancestors (the
+    writable set grows as work is promoted up)."""
+    cfg = stages_config()
+    st = cfg.get(name) or {}
+    if isinstance(st.get("writable"), list):
+        return list(st["writable"])
+    out = []
+    for n in {name} | _stage_ancestors(name, cfg, set()):
+        out += (cfg.get(n, {}) or {}).get("globs", []) or []
+    return out
+
+
+def writable_verdict(path):
+    """For the current stage: "allow" when `path` is writable or unclassified,
+    "deny" when it belongs to a stage outside the current stage's writable set.
+    None when there is no current stage."""
+    cs = current_stage()
+    if not cs:
+        return None
+    if _match_globs(path, writable_globs(cs)):
+        return "allow"
+    if stage_of(path) is None:
+        return "allow"                        # unclassified: out of scope
+    return "deny"
+
+
+_STAGE_DISABLE = ("false", "no", "disabled", "off")
+
+
+def stage_discipline(codename):
+    """The current stage's directive for `codename`: None (not mentioned), False
+    (disable), or an overrides dict (enable, possibly empty). A dict enables and
+    supplies per-stage config to merge; `true` or a non-disable string enables with
+    no changes; `false`/`no`/`disabled`/`off`/`0` disable."""
+    cs = current_stage()
+    if not cs:
+        return None
+    disc = (stages_config().get(cs) or {}).get("disciplines", {}) or {}
+    if codename not in disc:
+        return None
+    val = disc[codename]
+    if isinstance(val, dict):
+        return val
+    if val is True:
+        return {}
+    if isinstance(val, str) and val.strip().lower() not in _STAGE_DISABLE:
+        return {}
+    return False
+
+
+def effective_active():
+    """The effective active set: session-enabled codenames, plus the current
+    stage's enabled disciplines, minus its disabled ones. One source of truth so
+    enforcement (gates) and awareness (nudge, modeline) agree on what is active.
+    Note: a stage that toggles a discipline whose gate is not stage-aware
+    (hacc/iso/freeze) changes only the awareness plane, not that gate."""
+    base = set(active())
+    cs = current_stage()
+    if cs:
+        for name in (stages_config().get(cs) or {}).get("disciplines", {}) or {}:
+            d = stage_discipline(name)
+            if d is False:
+                base.discard(name)
+            elif d is not None:
+                base.add(name)
+    return base
+
+
+def effective(codename, default_action):
+    """(active, action) for a discipline. `active` comes from effective_active();
+    `action` is passed through by the caller from the now-stage-aware
+    `Discipline.get("action")`, so no strength logic lives here."""
+    return (codename in effective_active(), default_action)
+
+
+# ---- shell parsing (shared substrate) --------------------------------------
+
+_DESTRUCTIVE = re.compile(r"\b(rm|rmdir|mv|cp|shred|unlink)\b")
+# every shell construct that writes a file without showing a diff, by name.
+_WRITE_CONSTRUCTS = {
+    "redirect": r">>?\s*(?!/dev/null|&)[^\s&|;<>]",
+    "tee": r"\btee\b",
+    "dd": r"\bdd\b",
+    "truncate": r"\btruncate\b",
+    "sed -i": r"\bsed\b[^|]*\s-i",
+    "perl -i": r"\bperl\b[^|]*\s-i",
+    "awk -i": r"\b(?:gawk|awk)\b[^|]*-i[\s'\"]*inplace",
+    "patch": r"(?:^|[|;&]\s*)patch\b",
+    "line editor": r"(?:^|[|;&]\s*)(?:ed|ex)\b",
+    "install": r"(?:^|[|;&]\s*)install\b",
+    "vcs patch": r"\bgit\b[^|]*\bapply\b",
+}
+_CREATORS = (r"\btouch\b", r"\bmkdir\b", r"\bchmod\b")
+_INLINE_RUNTIME = re.compile(r"\b(?:python[0-9.]*|node|ruby|perl|php|deno|bun)\b[^|]*"
+                             r"(?:\s-[ce]\b|\s-\s*<<)")
+_INLINE_WRITE = re.compile(r"open\s*\([^)]*['\"](?:[wax]|r\+)[b+]*['\"]"
+                           r"|write_text|writeFile|writelines?\s*\(|\.write\s*\("
+                           r"|File\.(?:write|open)|fs\.(?:append|write)"
+                           r"|shutil\.(?:copy|move)"
+                           r"|os\.(?:replace|rename|remove|unlink)|Path\([^)]*\)\.write")
+
+
+def destructive_verbs(command):
+    """Filesystem-restructuring verbs present in a shell command, matched at a
+    word boundary so `chmod` or `alarm` do not trip. Returns the sorted set of
+    matched verbs, empty if none."""
+    return sorted({m.group(1) for m in _DESTRUCTIVE.finditer(command or "")})
+
+
+def write_constructs(command):
+    """The named shell constructs in `command` that write a file in place, and so
+    hide the change from a diff: a redirect or heredoc, an in-place editor, a
+    patch, `install`, and an inline interpreter script that opens a file for
+    writing. Returns the sorted set of names, empty if none."""
+    cmd = command or ""
+    found = {n for n, rx in _WRITE_CONSTRUCTS.items() if re.search(rx, cmd)}
+    if _INLINE_RUNTIME.search(cmd) and _INLINE_WRITE.search(cmd):
+        found.add("inline script")
+    return sorted(found)
+
+
+def mutates_files(command):
+    """Whether a shell command touches the filesystem at all: a destructive verb,
+    an in-place write, or a create. The broad question a gate asks when it cares
+    that a path was written, not how."""
+    cmd = command or ""
+    return bool(destructive_verbs(cmd) or write_constructs(cmd)
+                or any(re.search(rx, cmd) for rx in _CREATORS))
+
+
 # ---- escape hatch ----------------------------------------------------------
 
 def escaped(name):
-    """True if the per-discipline escape hatch CSOP_<NAME>=off is set."""
+    """True if the per-discipline escape hatch CSOP_<name>=off is set."""
     key = "CSOP_{0}".format(name.upper().replace("-", "_"))
     return os.environ.get(key, "").lower() in ("off", "0", "false")
 
@@ -198,7 +477,7 @@ def _decide(decision, reason):
 
 
 def ask(reason):
-    """Force a HUMAN confirmation prompt (sign-off). Can only ADD friction; a
+    """Force a human confirmation prompt (sign-off). Can only add friction; a
     static deny rule still wins."""
     _decide("ask", reason)
 
@@ -221,18 +500,151 @@ def enforce(action, reason):
     block(reason)
 
 
-# ---- CLI (module-as-script; disciplines imported lazily to avoid a cycle) ---
-#   python3 csop.py enable <name|codename> | list | catalog
+# ---- CLI: `csop.py enable <name|codename> | list | catalog` -----------------
+
+def _new_nudges(before):
+    """Nudge lines for disciplines that became active since the `before` snapshot
+    of effective_active(). On a stage change this is what the new stage freshly
+    activated. Returned for the CLI to print, so the /stage and /promote commands
+    surface them to the user and the model (the pre-turn additionalContext nudge is
+    model-facing and otherwise invisible)."""
+    import disciplines
+    gained = effective_active() - before
+    out = []
+    for d in disciplines.DISCIPLINES:
+        if d.codename in gained and not escaped(d.codename):
+            r = d.render("nudge")
+            for item in (r if isinstance(r, list) else [r]):
+                if item:
+                    out.append("- " + item)
+    return out
+
+
+_USAGE = """csop.py <command>
+
+  enable <name|codename>   activate a discipline for this session (until /clear)
+  list                     the active disciplines (the no-argument default)
+  catalog                  every discipline, with codename and description
+  stage [<name>]           show the current stage, or make <name> current
+  promote [<name>]         move to a successor stage along the `from` graph
+  demote [<name>]          move back to a source stage
+  help                     this text
+
+Slash commands forward verbatim: /csop, /disc, and /discipline take any of the
+above; /stage, /promote, and /demote are shorthands for their verbs."""
+
 
 def _cli(argv):
     if not argv:
         argv = ["list"]                 # no argument -> default to `list`
     import disciplines
     if argv[:1] == ["enable"] and len(argv) >= 2 and not argv[1].startswith("-"):
+        rid = disciplines.resolve(argv[1])
+        target = disciplines.closure({rid})
+        drop = set()
+        for cn in target:
+            drop |= disciplines.conflicts(cn)
+        drop -= target
         cur = active()
-        for cn in sorted(disciplines.closure({disciplines.resolve(argv[1])})):
-            cur = enable(cn)
-        print("active: " + " ".join(sorted(cur)))
+        direct = cur & drop
+        cascade = cur & disciplines.dependents(direct)
+        removed = direct | cascade
+        new = (cur | target) - removed
+        reset(new)
+        if removed:
+            def _name(c):
+                d = disciplines.by_codename(c)
+                return d.name if d else c
+            en = disciplines.by_codename(rid)
+            msg = "{0} disabled {1} (conflict)".format(
+                en.name if en else argv[1],
+                ", ".join(sorted(_name(c) for c in direct)))
+            if cascade:
+                msg += ", and {0} (requires it)".format(
+                    ", ".join(sorted(_name(c) for c in cascade)))
+            push_notice(msg + ".")
+        print("active: " + " ".join(sorted(new)))
+        if removed:
+            print("disabled: " + " ".join(sorted(removed)))
+        return 0
+    if argv[:1] == ["stage"]:
+        if len(argv) >= 2 and not argv[1].startswith("-"):
+            name = argv[1]
+            if name not in stages_config():
+                print("unknown stage: {0} (defined: {1})".format(
+                    name, " ".join(sorted(stages_config())) or "none"), file=sys.stderr)
+                return 2
+            before = effective_active()
+            set_stage(name)
+            print("stage: " + name)
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
+        names = list(stages_config().keys())
+        print("stage: " + (current_stage() or "(none)"))
+        print("available: " + (", ".join(names) if names else "(none defined)"))
+        return 0
+    if argv[:1] == ["promote"]:
+        cur = current_stage()
+        if not cur:
+            print("no current stage; set one with `csop.py stage <name>`", file=sys.stderr)
+            return 2
+        succ = stage_successors(cur)
+        if len(argv) >= 2 and not argv[1].startswith("-"):
+            target = argv[1]
+            if target not in succ:
+                print("cannot promote {0} -> {1} (successors: {2})".format(
+                    cur, target, ", ".join(succ) or "none"), file=sys.stderr)
+                return 2
+            before = effective_active()
+            set_stage(target)
+            print("promoted: {0} -> {1}".format(cur, target))
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
+        if not succ:
+            print("already at the top: " + cur)
+            return 0
+        if len(succ) > 1:
+            print("ambiguous: {0} promotes to any of {1}; pick with `csop.py stage <name>`".format(
+                cur, ", ".join(succ)))
+            return 0
+        before = effective_active()
+        set_stage(succ[0])
+        print("promoted: {0} -> {1}".format(cur, succ[0]))
+        for ln in _new_nudges(before):
+            print(ln)
+        return 0
+    if argv[:1] == ["demote"]:
+        cur = current_stage()
+        if not cur:
+            print("no current stage; set one with `csop.py stage <name>`", file=sys.stderr)
+            return 2
+        preds = (stages_config().get(cur) or {}).get("from") or []
+        if len(argv) >= 2 and not argv[1].startswith("-"):
+            target = argv[1]
+            if target not in preds:
+                print("cannot demote {0} -> {1} (sources: {2})".format(
+                    cur, target, ", ".join(preds) or "none"), file=sys.stderr)
+                return 2
+            before = effective_active()
+            set_stage(target)
+            print("demoted: {0} -> {1}".format(cur, target))
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
+        if not preds:
+            print("already at the bottom: " + cur)
+            return 0
+        if len(preds) > 1:
+            print("ambiguous: {0} demotes to any of {1}; pick with `csop.py stage <name>`".format(
+                cur, ", ".join(preds)))
+            return 0
+        before = effective_active()
+        set_stage(preds[0])
+        print("demoted: {0} -> {1}".format(cur, preds[0]))
+        for ln in _new_nudges(before):
+            print(ln)
         return 0
     if argv[:1] == ["list"]:
         print("active: " + " ".join(sorted(active())))
@@ -242,8 +654,10 @@ def _cli(argv):
             req = " [requires: {0}]".format(" ".join(d.requires)) if d.requires else ""
             print("{0}  ({1}){2}  {3}".format(d.name, d.codename, req, d.description))
         return 0
-    print("usage: csop.py (enable <name|codename> | list | catalog)",
-          file=sys.stderr)
+    if argv[:1] in (["help"], ["-h"], ["--help"]):
+        print(_USAGE)
+        return 0
+    print("unknown command: {0}\n{1}".format(" ".join(argv), _USAGE), file=sys.stderr)
     return 2
 
 

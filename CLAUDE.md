@@ -60,14 +60,16 @@ session needed):
 
     export CLAUDE_PLUGIN_DATA=$(mktemp -d) CLAUDE_SESSION_ID=t
     python3 hooks/csop.py enable iso
-    printf '%s' '{"session_id":"t","tool_name":"Bash","tool_input":{"command":"git worktree add /tmp/x HEAD"}}' | python3 hooks/gate_bashverb.py   # -> exit 2
+    printf '%s' '{"session_id":"t","tool_name":"Bash","tool_input":{"command":"git worktree add /tmp/x HEAD"}}' | python3 hooks/csop-gate-bashverb.py   # -> exit 2
 
 Verify in batches (parse, JSON-validate, one lifecycle smoke test), not per-edit.
 
 ## Boundaries (verified, detail in SPIKE)
 
-- Plugins cannot set the status line: `umodeline.py` (Stop hook) is the fallback
-  (display channel still UNVERIFIED live).
+- Plugins cannot set the status line via the plugin manifest, but a `statusLine`
+  entry works, CLI-only (confirmed absent in the desktop app on a genuine cold
+  start): see README's "Status line" section for the opt-in snippet and why it's
+  never auto-wired into a shared, committed `settings.json`.
 - Claude's permission modes are a closed set: disciplines are "user-space modes"
   built on hooks.
 - Plugins cannot observe ctrl-c/interrupts: never rely on hooks for critical
@@ -79,4 +81,4 @@ Verify in batches (parse, JSON-validate, one lifecycle smoke test), not per-edit
   verify against current plugin docs before treating this as a real installable
   plugin. (Self-hosting here uses `.claude/settings.json` with `${CLAUDE_PROJECT_DIR}`,
   which sidesteps that until verified.)
-- `umodeline` display channel: confirm which channel actually renders.
+- `statusLine` rendering in the web app: untested.

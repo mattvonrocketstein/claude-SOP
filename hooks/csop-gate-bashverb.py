@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse gate: IsolatedTree worktree creation (codename `iso`).
 
-Two jobs when `iso` is active. (1) A `git worktree add` whose target is not under
-the crash-safe iso dir is BLOCKED (iso-trees must live there, never /tmp). (2) A
-`git worktree add` that IS under the iso dir, for a tree that does not yet exist,
-is stamped into a session-owned manifest -- so gate_isowrite can later tell a
-freshly-created tree (writable) from a reused stale/WIP one (blocked). Fail-open;
-escape hatch CSOP_ISO=off.
+Blocks a worktree added outside the crash-safe iso dir, and stamps one added
+inside it into a session-owned manifest, so csop-gate-isowrite can later tell a
+freshly created tree from a reused stale one. Fail-open; hatch CSOP_ISO=off.
 """
 import os
 import re
@@ -19,11 +16,11 @@ import disciplines  # noqa: E402
 
 _ISO = disciplines.IsoTree
 DISCIPLINE = _ISO.codename                                 # "iso"
-_DIR = _ISO.get("dir")                                     # project-overridable
+_DIR = _ISO.get("home")                                    # project-overridable
 _MANIFEST = "iso-trees.json"
 _VERB = re.compile(r"\bgit\b[^|;&]*\bworktree\s+add\b")
 _REQUIRED = re.compile(re.escape(_DIR))
-_MSG = ("CSOP[iso] BLOCKED: `git worktree add` must target the crash-safe iso "
+_MSG = ("CSOP[iso] blocked: `git worktree add` must target the crash-safe iso "
         "dir ({0}<name>), never /tmp. Escape hatch: prefix `CSOP_ISO=off`.".format(_DIR))
 
 

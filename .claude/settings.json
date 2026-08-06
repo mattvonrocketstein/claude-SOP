@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 hooks/csop.py)",
-      "Bash(python3 hooks/csop.py *)"
+      "Bash(python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop.py\")",
+      "Bash(python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop.py\" *)"
     ]
   },
   "hooks": {
@@ -10,14 +10,14 @@
       {
         "matcher": "startup|clear|resume",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/session_reset.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-session-reset.py\"" }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/reminder.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-nudge.py\"" }
         ]
       }
     ],
@@ -25,41 +25,55 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_bashverb.py\"" },
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_git.py\"" },
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_scratch.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-bashverb.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-git.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-scratch.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-entrypoints.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-racc.py\"" }
         ]
       },
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_hyg.py\"" },
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_softnudge.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-hyg.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-techwrite.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-idiom.py\"" }
         ]
       },
       {
         "matcher": "Read|Edit|Write|MultiEdit|Grep|Glob|Bash",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_pathblock.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-pathblock.py\"" }
         ]
       },
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_isowrite.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-isowrite.py\"" }
         ]
       },
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/gate_dreamwrite.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-selfprotect.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-dreamwrite.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-promotion.py\"" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-react-filehooks.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-promotion.py\"" }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/umodeline.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-modeline.py\"" }
         ]
       }
     ]

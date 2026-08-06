@@ -11,12 +11,12 @@ active until `/clear`; there is no mid-session disable. Each has a **name** (e.g
 ## Managing disciplines
 
 `/discipline` (aliases `/csop`, `/disc`) forwards its arguments VERBATIM to the
-one CLI — `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
+one CLI, so `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
 
-- `enable <name|codename>` — activate a discipline (e.g. `IsolatedTree` or `iso`);
+- `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`);
   sticky until `/clear`.
-- `list` — show active disciplines (also the no-arg default).
-- `catalog` — list all known disciplines.
+- `list`: show active disciplines (also the no-arg default).
+- `catalog`: list all known disciplines.
 - Disarm all: `/clear`.
 
 ## Two halves of a discipline
@@ -33,4 +33,4 @@ one CLI — `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <a
 When enabled, risky/experimental changes to a project's **core** must be
 prototyped in an **iso-tree** (an isolated `git worktree` under a crash-safe,
 in-repo, gitignored dir -- convention `scratch/iso/` -- never `/tmp`). The
-`gate_bashverb` hook blocks `git worktree add` targeting anywhere else.
+`csop-gate-bashverb` hook blocks `git worktree add` targeting anywhere else.

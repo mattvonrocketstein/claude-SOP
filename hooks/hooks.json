@@ -3,14 +3,14 @@
     {
       "matcher": "startup|clear|resume",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_reset.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-session-reset.py\"" }
       ]
     }
   ],
   "UserPromptSubmit": [
     {
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/reminder.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-nudge.py\"" }
       ]
     }
   ],
@@ -18,41 +18,55 @@
     {
       "matcher": "Bash",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_bashverb.py\"" },
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_git.py\"" },
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_scratch.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-bashverb.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-git.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-scratch.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-entrypoints.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-racc.py\"" }
       ]
     },
     {
       "matcher": "Edit|Write|MultiEdit",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_hyg.py\"" },
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_softnudge.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-hyg.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-techwrite.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-idiom.py\"" }
       ]
     },
     {
       "matcher": "Read|Edit|Write|MultiEdit|Grep|Glob|Bash",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_pathblock.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-pathblock.py\"" }
       ]
     },
     {
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_isowrite.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-isowrite.py\"" }
       ]
     },
     {
       "matcher": "Edit|Write|MultiEdit|NotebookEdit",
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_dreamwrite.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-selfprotect.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-dreamwrite.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-promotion.py\"" }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-react-filehooks.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-promotion.py\"" }
       ]
     }
   ],
   "Stop": [
     {
       "hooks": [
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/umodeline.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-modeline.py\"" }
       ]
     }
   ]

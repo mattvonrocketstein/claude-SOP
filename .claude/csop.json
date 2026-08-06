@@ -1,11 +1,11 @@
 {
-  // CSOP project config -- the MODEL other projects copy + edit.
+  // CSOP project config -- the model other projects copy and edit.
   // Overrides code-default properties per discipline (keyed by codename); only a
-  // discipline's OVERRIDABLE properties are honored -- identity/description live
+  // discipline's overridable properties are honored -- identity/description live
   // in code. Parsed as JSON-with-comments (// and /* */, trailing commas ok).
 
   "iso": {
-    "dir": "scratch/iso/"            // where iso-trees must live (never /tmp)
+    "home": "scratch/iso/"           // where iso-trees must live (never /tmp)
   },
 
   "hacc": {
@@ -16,8 +16,32 @@
 
   "scratch": {
     "default_enabled": true,
-    "scratch_dir": "scratch/",       // MOVE content here instead of deleting it
+    "home": "scratch/",              // move content here instead of deleting it
     // "deny_patterns": [ /* regexes for destructive commands; see code default */ ],
-    // "reminder": "…"                // APPENDED to the built-in reminder (not replaced)
+    // "reminder": "…"                // appended to the built-in reminder (not replaced)
+  },
+
+  "pro": {
+    "default_enabled": true          // dogfood: promotion active on this repo
+  },
+
+  "techwrite": {
+    "default_enabled": true          // this repo is mostly prose; implies hyg
+  },
+
+  // placeholder stages, permissive writable so nothing is restricted yet; iterate later
+  "stages": {
+    "spike": {
+      "default_stage": true,
+      "globs": ["scratch/**"],
+      "writable": ["**"]
+    },
+    "core": {
+      "globs": ["hooks/**", "tests/**"],
+      "from": ["spike"],
+      "writable": ["**"],
+      "pre":  { "text": "core edit: prototype risky changes in scratch/iso first, then promote", "action": "nudge" },
+      "post": "core changed: run make test"
+    }
   },
 }
