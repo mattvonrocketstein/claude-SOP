@@ -1,0 +1,23 @@
+{
+  // CSOP project config -- the MODEL other projects copy + edit.
+  // Overrides code-default properties per discipline (keyed by codename); only a
+  // discipline's OVERRIDABLE properties are honored -- identity/description live
+  // in code. Parsed as JSON-with-comments (// and /* */, trailing commas ok).
+
+  "iso": {
+    "dir": "scratch/iso/"            // where iso-trees must live (never /tmp)
+  },
+
+  "hacc": {
+    "default_enabled": true,         // set false to opt this project out
+    // git subcommands the agent may not run (a human runs them); reads + `git add` pass:
+    "deny_list": ["commit", "stash", "checkout", "switch", "reset", "rebase", "merge", "push", "pull", "revert", "restore", "clean", "cherry-pick", "am", "rm", "mv", "apply", "gc", "prune", "filter-branch", "filter-repo"],
+  },
+
+  "scratch": {
+    "default_enabled": true,
+    "scratch_dir": "scratch/",       // MOVE content here instead of deleting it
+    // "deny_patterns": [ /* regexes for destructive commands; see code default */ ],
+    // "reminder": "…"                // APPENDED to the built-in reminder (not replaced)
+  },
+}

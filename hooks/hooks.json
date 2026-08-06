@@ -1,0 +1,59 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "startup|clear|resume",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_reset.py\"" }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/reminder.py\"" }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_bashverb.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_git.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_scratch.py\"" }
+      ]
+    },
+    {
+      "matcher": "Edit|Write|MultiEdit",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_hyg.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_softnudge.py\"" }
+      ]
+    },
+    {
+      "matcher": "Read|Edit|Write|MultiEdit|Grep|Glob|Bash",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_pathblock.py\"" }
+      ]
+    },
+    {
+      "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_isowrite.py\"" }
+      ]
+    },
+    {
+      "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_dreamwrite.py\"" }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/umodeline.py\"" }
+      ]
+    }
+  ]
+}

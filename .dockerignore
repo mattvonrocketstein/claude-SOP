@@ -1,0 +1,28 @@
+# VCS
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Node (if tooling is added later)
+node_modules/
+
+# Claude / local + transient
+.claude/settings.local.json
+.claude/state/
+csop-state/
+scratch/
+*.log
+*.tmp
+
+# OS / editor
+.DS_Store
+*.swp
+*~

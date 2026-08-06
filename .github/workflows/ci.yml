@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # CSOP is stdlib-only: no pip install step, just python3 on PATH.
+      - name: Validate (python parse + json/jsonc)
+        run: make validate NO_COLOR=1
+
+      - name: Offline smoke test (hooks + CLI)
+        run: make check NO_COLOR=1

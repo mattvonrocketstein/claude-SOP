@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Claude / local -- commit settings.json + csop.json; ignore local + generated + state
+.claude/settings.local.json
+.claude/csop-state/
+.claude/commands/
+csop-state/
+
+# scratch / transient
+scratch/
+*.log
+*.tmp
+
+# OS / editor
+.DS_Store
+*.swp
+*~

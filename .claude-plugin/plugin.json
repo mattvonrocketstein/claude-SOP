@@ -1,0 +1,7 @@
+{
+  "name": "csop",
+  "description": "CSOP: create and manage multiple toggleable, hook-enforced disciplines (SOPs) for Claude Code.",
+  "version": "0.0.1",
+  "author": { "name": "mattvonrocketstein" },
+  "hooks": "./hooks/hooks.json"
+}
