@@ -34,13 +34,18 @@ def _added(tool, ti):
 
 
 def _rules():
-    out = []
+    """Compiled reject rules, plus a note per entry too broken to use."""
+    out, bad = [], []
     for r in _IDIOM.get("reject") or []:
+        if not isinstance(r, dict) or "pattern" not in r:
+            bad.append("no `pattern` key: {0}".format(
+                sorted(r) if isinstance(r, dict) else r))
+            continue
         try:
             out.append((re.compile(r["pattern"]), r.get("message", "not idiomatic")))
-        except Exception:
-            pass
-    return out
+        except Exception as e:
+            bad.append("bad regex {0}: {1}".format(r["pattern"], e))
+    return out, bad
 
 
 def main():
@@ -51,9 +56,9 @@ def main():
     active, action = csop.effective(DISCIPLINE, _IDIOM.get("action"))
     if not active or csop.escaped(DISCIPLINE):
         csop.allow()
-    rules = _rules()
+    rules, bad = _rules()
     if not rules:
-        csop.allow()
+        csop.dropped(_IDIOM.name, DISCIPLINE, bad)
     ti = event.get("tool_input", {}) or {}
     hits, seen, lines = [], set(), []
     for line in _added(tool, ti):
@@ -61,7 +66,7 @@ def main():
             if rx.search(line):
                 hits.append((msg, line.strip()[:90]))
     if not hits:
-        csop.allow()
+        csop.dropped(_IDIOM.name, DISCIPLINE, bad)
     for why, snip in hits:
         if (why, snip) in seen:
             continue

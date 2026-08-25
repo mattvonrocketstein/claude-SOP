@@ -16,7 +16,7 @@ any substantial change.
 
 - **discipline**: a process protocol with a **name** (e.g. `IsolatedTree`), a
   **description**, and a **codename** (e.g. `iso`; defaults to the slugified name).
-  Toggleable, pure opt-in, sticky-latch (enable per session, active until `/clear`).
+  Toggleable, pure opt-in, enabled per session.
 - **gate**: a PreToolUse hook that enforces a discipline (hard-block `exit 2`, or
   soft-nudge `exit 0` + additionalContext). Fails OPEN on error.
 - The **codename keys everything** (state + gates). Roster is `csop.json`.
@@ -26,9 +26,12 @@ any substantial change.
 `/discipline`, aliased **`/csop`** and **`/disc`**, forwards its arguments VERBATIM
 to the one CLI, so `/csop <args>` is equivalent to `python3 hooks/csop.py <args>`:
 
-- `enable <name|codename>` (e.g. `IsolatedTree` or `iso`): active until `/clear`.
+- `enable <name|codename>` (e.g. `IsolatedTree` or `iso`).
 - `list` (also the no-arg default), `catalog`.
-- No `disable`: `/clear` disarms everything (SessionStart reset wipes state).
+- `disable <name|all>`, human-only: `/csop-disable` is the human's command, and
+  `csop-gate-disarm.py` blocks every route an agent has to a smaller active set.
+  Never try to disarm a discipline; ask the human to run it.
+- `/clear` disarms everything (SessionStart reset wipes state).
 
 A slash command is always one model turn (a brief pause), even though the CLI is
 instant -- the `!`-prefixed command body makes it a single deterministic relay,

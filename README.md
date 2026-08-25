@@ -8,7 +8,7 @@ Claude's *native* modes like *(plan | accept-edits | auto)* are a closed, built-
 
 A SOP is a group of active "disciplines", or, what you might call *user-space modes*.
 
-Yup, a real person writes these (some of) these docs, and curates the rest.  Be advised however that this is *definitely* a vibe-coded solution for vibe-coding problems.  I mean, come on, it is probably better than *nothing*, right?  Right?!
+Yup, a real person writes *most* of these docs, and curates the rest.  Be advised however that this is *definitely* a vibe-coded solution for vibe-coding problems.  I mean, come on, it is probably better than *nothing*, right?  Right?!
 
 **Quick Links:** [The Problem](#the-problem-missing-user-modes) | [Enter CSOP](#enter-csop) | [Compare And Contrast](#compare-and-contrast) | [Examples](#examples) | [Install](#install) | [The Disciplines](#the-disciplines) | [Configuration Layering](#configuration-layering) | [Layout](#layout) | [Abstractions](#abstractions) | [Misc Notes](#misc-notes)
 
@@ -28,8 +28,6 @@ Anyway.. who cares?  Everyone should!  There's a lot of possibilities between re
 
 **What about Agents?**  Subagents (`.claude/agents/*.md`) are the closest *native* thing to a user-defined mode.  They provide a name, a system prompt, a blessed `tools:` list.  Still a role though and not yet a mode!  It's the granularity/layer problem again.  Tools-governance here is a coarse allow-list.. it can say "no Bash", but not "Bash *only for `tox`*".  An agent is a *delegate you spawn for a task*, not a persistent constraint that could hard-block your next tool call, and as a glorified prompt, there's little room for determinism, or CI-style progressive guarantees / ratcheting gates.  More on that later.
 
--------------------------------------------
-
 ## Enter CSOP
 
 With Claude's real mode internals unavailable for extension, this plugin fakes it by using everything else that *is* available, and allows for configuring, activating, and deactivating progressive *layers* of restrictions.
@@ -47,9 +45,9 @@ Current stage and active-disciplines are displayed in the user modeline:
 
 ## Compare And Contrast
 
-With definitions in hand, back to Claude's built-in agents for a second.  Those *can't be* a discipline.  But disciplines *do compose with agents*, since hooks fire *inside* subagents too.  A discipline then is *the deterministic foundation any agent runs on*.  
+With definitions in hand, back to Claude's built-in agents for a second.  Those *can't be* a discipline.  But disciplines do *compose* with agents, since hooks fire *inside* subagents too.  A discipline then is.. basically the deterministic foundation any agent runs on, regardless of the rest of the prompts that are in play.
 
-If the whole *stage* thing sounds like reinventing CI/CD, well yeah, wouldn't it be nice to avoid this?  Some people might like the idea of bolting on *actual CI* and a whole evented subsystems for this sort of thing better.  Sounds fun, but again it's the same layer/granularity mismatch.. post-commit vs pre-edit is a very different thing.  And if you propose to manage a swarm autonomously, you may want to start with effectively steering something small interactively.
+If the whole *stage* thing sounds like reinventing CI/CD, well yeah, wouldn't it be nice to avoid this?  Some people might like the idea of bolting on *actual CI* and a whole evented subsystem for this sort of thing better.  Sounds fun! But again it's likely to hit that layer/granularity mismatch thing, e.g. a post-commit vs a pre-edit hook is quite a different thing, and sometimes you can't just compromise here and accept problems "temporarily" to be corrected "later, maybe, if token budget permits".  If you propose to manage a swarm autonomously, you may want to start with effectively steering something small interactively.
 
 ## Examples
 
@@ -58,8 +56,9 @@ NB: List is incomplete.  Lots of in-flight WIP and experiments in the repo, so t
 | Discipline | Codename | Default | Code | Summary |
 |---|---|---|---|---|
 | **[Human Accountability](#human-accountability)** | `hacc` | on | [code](hooks/csop-gate-git.py) | Git is read-only for the agent. |
-| **[Robot Accountability](#robot-accountability)** | `racc` | opt-in | [code](hooks/csop-gate-racc.py) | The robot counterpart to Human Accountability: file changes go through the Edit/Write tool (a visible diff), not in-place shell mutations. |
-| **[Generative Hygiene](#generative-hygiene)** | `hyg` | on | [code](hooks/csop-gate-hyg.py) | Comment hygiene on agent-generated code. |
+| **[Robot Accountability](#robot-accountability)** | `racc` | on with `hyg` | [code](hooks/csop-gate-racc.py) | The robot counterpart to Human Accountability: file changes go through the Edit/Write tool (a visible diff), not in-place shell mutations. |
+| **[Memory Accountability](#memory-accountability)** | `mem` | opt-in | [code](hooks/csop-gate-mem.py) | Memory formation is a human decision: a write to a memory path asks first, is denied, or is reported, per `mode`. Implies `racc`. |
+| **[Generative Hygiene](#generative-hygiene)** | `hyg` | on | [code](hooks/csop-gate-hyg.py) | Comment hygiene on agent-generated code. Implies `racc`. |
 | **[IsolatedTree](#isolatedtree)** | `iso` | opt-in | [code](hooks/csop-gate-isowrite.py) | Risky/exploratory/experimental changes to a project's core must be prototyped in an isolated git worktree (an 'iso-tree') under the crash-safe, in-repo, gitignored `home` (default scratch/iso/), never /tmp. |
 | **Scratch** | `scratch` | on | [code](hooks/csop-gate-scratch.py) | Discourages/denies destructive commands, directing agent to use scratch folder. |
 | **Promotion** | `pro` | opt-in | [code](hooks/csop-gate-promotion.py) | Changes to core should be deliberate promotions of work proven in an iso-tree/scratch (small, tested, reviewable diffs), not ad-hoc edits. |
@@ -82,7 +81,9 @@ The pattern with the more interesting stuff is generalizing a prompt-based role 
 
 Projects opt in to CSOP using plain files wired through `${CLAUDE_PROJECT_DIR}`; no marketplace, no plugin install, no manifest. Just put a checkout somewhere in (or reachable from) the project, then run `make install` **from** CSOP, **inside** the project folder.
 
-**Requires Claude Code v2.1.196 or later.** The `/csop`, `/disc`, `/discipline`, `/stage`, `/promote`, and `/demote` commands run `csop.py` via `${CLAUDE_PROJECT_DIR}`, which Claude Code substitutes in a command body only on v2.1.196+ (hooks get it on any version). On older CLIs the variable is left empty and the command fails with a "can't open file" error. `make install` (and `make init`) check `claude --version` and **refuse to proceed** below v2.1.196, writing nothing; upgrade the CLI, or bypass at your own risk with `SKIP_VERSION_CHECK=1`.
+### Reqs 
+
+**Requires Claude Code v2.1.196 or later.** The `/csop`, `/disc`, `/discipline`, `/stage`, `/promote`, `/demote`, and `/csop-disable` commands run `csop.py` via `${CLAUDE_PROJECT_DIR}`, which Claude Code substitutes in a command body only on v2.1.196+ (hooks get it on any version). On older CLIs the variable is left empty and the command fails with a "can't open file" error. `make install` (and `make init`) check `claude --version` and **refuse to proceed** below v2.1.196, writing nothing; upgrade the CLI, or bypass at your own risk with `SKIP_VERSION_CHECK=1`.
 
 ### Submodule
 
@@ -96,12 +97,15 @@ git submodule add \
 && make -C .claude/csop install
 ```
 
-This writes the project's `.claude/settings.json` (hooks pointing back at the submodule), and creates the `/csop`, `/disc`, `/discipline`, `/stage`, `/promote`, and `/demote` commands. It never overwrites an existing `settings.json`; if one is present it prints a note showing what to merge. Then:
+This writes the project's `.claude/settings.json` (hooks pointing back at the submodule), and creates the `/csop`, `/disc`, `/discipline`, `/stage`, `/promote`, `/demote`, and `/csop-disable` commands. It never overwrites an existing `settings.json`; if one is present it prints a note showing what to merge. Then:
 
 - add `.claude/csop-state/` to the project's `.gitignore` (runtime state),
 - start a Claude Code session in the project and approve workspace trust once.
 
-The default disciplines activate immediately; opt into the rest with `/csop enable <name>`. 
+The default disciplines activate immediately; opt into the rest with `/csop enable <name>`. Turn one back off with `/csop-disable <name>`, or `/csop-disable all`.
+
+Disabling is human-only. The agent can arm a discipline but never disarm one: an always-on rail, [`csop-gate-disarm.py`](hooks/csop-gate-disarm.py), blocks every route from a tool call to a smaller active set, including edits to csop's own state. A slash command reaches `disable` because its body runs a fixed command shape that the rail escalates to a permission prompt, and only a human can clear a prompt. Approve one only when you just typed the command yourself.
+
 
 Upgrade later with `git submodule update --remote`; teammates run `git submodule update --init` after cloning.
 
@@ -129,7 +133,7 @@ written into the project, and each project keeps its own state and
 
 -------------------------------------------
 
-## The Disciplines
+## Discipline Details
 
 ### IsolatedTree
 
@@ -253,9 +257,11 @@ Git is read-only for the agent. Commands that mutate history, branches, the work
 
 ### Robot Accountability
 
-`racc` · opt-in · enable with `/csop enable racc`
+`racc` · opt-in, and co-activated by [Generative Hygiene](#generative-hygiene) · enable with `/csop enable racc`
 
 The agent must change files visibly through the Edit or Write tool, which shows a diff, not through in-place shell mutations. It is the robot counterpart to Human Accountability: no sneaky edits by shell.
+
+Because `hyg` is default-on, `racc` is normally active too. Hygiene and technical writing inspect Edit and Write payloads only, so an in-place shell write would otherwise be an unchecked path around them.
 
 **Enforced restrictions**
 
@@ -273,9 +279,44 @@ The agent must change files visibly through the Edit or Write tool, which shows 
   <li><code>default_enabled</code>: off by default.</li>
 </ul>
 
+### Memory Accountability
+
+`mem` · opt-in · implies [`racc`](#robot-accountability) · enable with `/csop enable mem`
+
+Memory formation is a human decision, not a side effect. A memory file outranks instructions in every later session, so a wrong one, recorded from an error, a flaky result, or a single-run observation, is expensive and quiet. The discipline governs writes to the memory paths and makes each one either the human's call or, at minimum, audible.
+
+`racc` comes along because the gate sees Edit and Write only; without it a shell redirect would write a memory unobserved.
+
+**Modes** (`mode`, default `approval`)
+
+<ul>
+  <li><code>approval</code>: the write asks the human first, quoting the proposed memory text. It rests on <code>ask</code>, which overrides every permission mode, so it is the setting that holds everywhere.</li>
+  <li><code>amnesiac</code>: the write is denied outright. It rests on <code>deny</code>, which the permission layer ignores under <code>bypassPermissions</code>; if a write lands anyway, the reporter raises it as an alarm.</li>
+  <li><code>visible</code>: the write is allowed and named in the end-of-turn modeline. A memory can still form, but never in silence.</li>
+</ul>
+
+**Enforced restrictions**
+
+<ul>
+  <li><strong>Memory paths only.</strong> A write is governed when its target matches <code>paths</code>: <code>MEMORY.md</code>, project and user <code>CLAUDE.md</code>, and any <code>memory/</code> directory. Every other write passes untouched.</li>
+  <li><strong>Retraction passes.</strong> An edit that only removes memory text is allowed under <code>allow_retraction</code>, which keeps correcting a bad memory cheap.</li>
+  <li><strong>Landed writes are reported.</strong> A PostToolUse reporter speaks under <code>visible</code> and <code>amnesiac</code>, quoting up to <code>excerpt_chars</code> of what was recorded.</li>
+  <li><strong>Escape hatch:</strong> export <code>CSOP_MEM=off</code>.</li>
+</ul>
+
+**Config** (`.claude/csop.json`, project-overridable)
+
+<ul>
+  <li><code>mode</code>: <code>approval</code> (default), <code>amnesiac</code>, or <code>visible</code>.</li>
+  <li><code>paths</code>: the governed memory paths; project entries are appended to the defaults.</li>
+  <li><code>allow_retraction</code>: let removal-only edits through (default true).</li>
+  <li><code>excerpt_chars</code>: cap on quoted memory text in a prompt or modeline notice (default 120).</li>
+  <li><code>default_enabled</code>: off by default.</li>
+</ul>
+
 ### Generative Hygiene
 
-`hyg` · default-on (opt out with `"default_enabled": false`)
+`hyg` · default-on (opt out with `"default_enabled": false`) · implies [`racc`](#robot-accountability)
 
 Comment hygiene on agent-generated code. It rejects the tells of a model narrating to itself in the source: over-long comment blocks, code syntax quoted in comments, and shouted words. Reasoning belongs in a notes or spike doc under `notes_dir`, not in the code.
 
@@ -308,6 +349,7 @@ Comment hygiene on agent-generated code. It rejects the tells of a model narrati
       <li>Markdown belongs to <a href="#technical-writer">Technical Writer</a> instead; the two gates partition the tree rather than overlap.</li>
     </ul>
   </li>
+  <li><strong>Shell writes closed off.</strong> Enabling <code>hyg</code> also activates <a href="#robot-accountability">Robot Accountability</a>, since this gate sees only Edit and Write; without it, a <code>sed -i</code> or a heredoc would write comments the gate never reads.</li>
   <li><strong>Escape hatch:</strong> export <code>CSOP_HYG=off</code>.</li>
 </ul>
 
@@ -333,7 +375,7 @@ Comment hygiene on agent-generated code. It rejects the tells of a model narrati
 
 ### Technical Writer
 
-`techwrite` · opt-in · enable with `/csop enable techwrite` (implies `hyg`)
+`techwrite` · opt-in · enable with `/csop enable techwrite` (implies `hyg`, and `racc` through it)
 
 Clear technical writing, plus a lint against generated-prose tells and code leaking into docs. The awareness half nudges the usual moves: lead with the point, stay concise, prefer active voice, structure with headings and lists, show with an example. The enforcement half checks added text.
 
@@ -349,10 +391,10 @@ Clear technical writing, plus a lint against generated-prose tells and code leak
 **Config** (`.claude/csop.json`, project-overridable)
 
 <ul>
-  <li><code>banned</code>: substrings rejected in any added text (default the em-dash and a stock cliche).</li>
+  <li><code>banned</code>: substrings rejected in any added text, matched case-insensitively (default the em-dash, a stock cliche, and a handful of model tics).</li>
   <li><code>prose_globs</code>: which files the prose rules apply to.</li>
   <li><code>prose_rules</code>: <code>{pattern, message, in_spans}</code> regexes for code-in-prose; empty by default.</li>
-  <li><code>discouraged</code>: prose-only words that warn without ever blocking (default <code>gate</code>, <code>seam</code>, <code>leverage</code>, <code>seamless</code>).</li>
+  <li><code>discouraged</code>: prose-only words that warn without ever blocking (default <code>gate</code>, <code>leverage</code>, <code>substrate</code>).</li>
   <li><code>token</code> / <code>exempt</code>: the per-line opt-out marker and the skipped basenames.</li>
   <li><code>action</code>: enforcement strength (default <code>deny</code>).</li>
 </ul>
@@ -388,40 +430,6 @@ it. Everything else replaces.
 
 A stage becomes current via `/csop stage <name>` (or `/promote`), and the stage
 layer applies to every gate that reads its discipline through `get()`.
-
-## Layout
-
-```
-.claude-plugin/
-  plugin.json          # manifest: name/version + points at hooks.json  (schema: verify)
-hooks/
-  hooks.json           # wires every hook: SessionStart, UserPromptSubmit,
-                       #   PreToolUse, PostToolUse, Stop
-  csop.py              # substrate (state, stages, escape-hatch, fail-open, enforce)
-                       #   + module-as-script CLI: enable | stage | promote | demote
-                       #   | list | catalog
-  disciplines.py       # discipline registry (identity + defaults, in code)
-  csop-session-reset.py     # SessionStart(clear|startup) -> reseed per-session state
-  csop-nudge.py             # UserPromptSubmit: inject each active discipline's nudge
-  csop-modeline.py          # Stop hook: modeline + reminders + one-time notices
-  csop-statusline.py        # opt-in `statusLine` command: same summary, CLI-only
-  csop-react-filehooks.py   # archetype: PostToolUse reactor (feeds output back)
-  csop-gate-bashverb.py     # archetype: hard-block a Bash verb unless a condition holds
-  csop-gate-pathblock.py    # archetype: hard-block access to protected paths
-  csop-gate-*.py            # one gate per enforced discipline: git, hyg, racc,
-                            #   scratch, techwrite, idiom, isowrite, entrypoints,
-                            #   promotion, dreamwrite, selfprotect
-commands/                   # canonical slash-command sources; make init / make install
-  csop.md  disc.md          #   materialize these into .claude/commands/
-  discipline.md  stage.md
-  promote.md  demote.md
-skills/discipline/
-  SKILL.md             # awareness half + management verbs
-docs/
-  gate-internals.md    # design detail behind the gate implementations
-tests/test_csop.py     # offline suite: static sanity + gate/CLI behavior
-tools/merge_settings.py   # idempotent settings.json merge used by `make install`
-```
 
 -------------------------------------------
 

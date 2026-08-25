@@ -58,6 +58,22 @@ def _region_specs():
     return specs
 
 
+def _bad_regions():
+    """A note per doc_regions entry too broken to use, for the allow path."""
+    bad = []
+    for r in _HYG.get("doc_regions") or []:
+        if not isinstance(r, dict) or "open" not in r or "close" not in r:
+            bad.append("needs `open` and `close`: {0}".format(
+                sorted(r) if isinstance(r, dict) else r))
+            continue
+        for k in ("open", "close"):
+            try:
+                re.compile(r[k])
+            except Exception as e:
+                bad.append("bad regex {0}: {1}".format(r[k], e))
+    return bad
+
+
 def _scan(text, state=None, markers=None):
     """Classify each line as code, comment, or doc, carrying any open-region
     state so a later chunk can resume. A `doc` line is documentation by its
@@ -301,7 +317,7 @@ def main():
     except Exception:
         csop.allow()                       # fail open
     if not findings:
-        csop.allow()
+        csop.dropped(_HYG.name, DISCIPLINE, _bad_regions())
     seen, lines = set(), []
     for name, why, snip in findings:
         if (name, snip) in seen:

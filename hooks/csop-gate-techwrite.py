@@ -150,14 +150,19 @@ def _word_rx(words):
 
 
 def _rules():
-    out = []
+    """Compiled prose rules, plus a note per entry too broken to use."""
+    out, bad = [], []
     for r in _TW.get("prose_rules") or []:
+        if not isinstance(r, dict) or "pattern" not in r:
+            bad.append("no `pattern` key: {0}".format(
+                sorted(r) if isinstance(r, dict) else r))
+            continue
         try:
             out.append((re.compile(r["pattern"]), r.get("message", "code in prose"),
                         bool(r.get("in_spans"))))
-        except Exception:
-            pass
-    return out
+        except Exception as e:
+            bad.append("bad regex {0}: {1}".format(r["pattern"], e))
+    return out, bad
 
 
 def main():
@@ -172,10 +177,10 @@ def main():
     fp = ti.get("file_path", "")
     if os.path.basename(fp) in (_TW.get("exempt") or []):
         csop.allow()
-    banned = _TW.get("banned") or []
+    banned = [(b, b.lower()) for b in (_TW.get("banned") or []) if b]
     token = _TW.get("token") or ""
     soft = _word_rx(_TW.get("discouraged"))
-    hits, warns = [], []
+    hits, warns, bad = [], [], []
 
     if _prose(fp):
         new, old = _new_old(tool, ti)
@@ -183,14 +188,15 @@ def main():
         raw = new.splitlines()
         masked = _mask(new, True)          # backtick spans blanked
         spans = _mask(new, False)          # backtick spans left intact (for in_spans rules)
-        rules = _rules()
+        rules, bad = _rules()
         for i, line in enumerate(raw):
             if line in seen or (token and token in line):
                 continue
             mfull = masked[i] if i < len(masked) else ""
             mspan = spans[i] if i < len(spans) else ""
-            for b in banned:
-                if b and b in mfull:
+            low = mfull.lower()
+            for b, bl in banned:
+                if bl in low:
                     hits.append(("banned `{0}`".format(b), mfull.strip()[:90]))
             for w, rx in soft:
                 if rx.search(mfull):
@@ -203,12 +209,13 @@ def main():
         for line in _added(tool, ti):
             if token and token in line:
                 continue
-            for b in banned:
-                if b and b in line:
+            low = line.lower()
+            for b, bl in banned:
+                if bl in low:
                     hits.append(("banned `{0}`".format(b), line.strip()[:90]))
 
     if not hits and not warns:
-        csop.allow()
+        csop.dropped(_TW.name, DISCIPLINE, bad)
 
     def _fmt(items):
         out, seen = [], set()

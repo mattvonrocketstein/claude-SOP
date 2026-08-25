@@ -57,7 +57,11 @@ def main():
     cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     msgs = []
     for t in _D.get("types") or []:
-        if not _match(fp, t.get("match_globs", [])):
+        if "match" not in t:
+            msgs.append("malformed `types` entry, no `match` key: {0}".format(
+                sorted(t.keys())))
+            continue
+        if not _match(fp, t.get("match")):
             continue
         if t.get("reminder"):
             msgs.append(t["reminder"].replace("{file}", fp))

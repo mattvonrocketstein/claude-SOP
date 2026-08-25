@@ -20,6 +20,8 @@ DISCIPLINE = _FREEZE.codename
 _WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 _READ_TOOLS = ("Read", "Grep", "Glob", "Bash")
 
+_BAD = []                                 # frozen entries dropped as unusable
+
 
 def _entries():
     default_mode = _FREEZE.get("mode") or "no-write"
@@ -32,6 +34,8 @@ def _entries():
                             "why": item.get("why", ""), "use": item.get("use", ""),
                             "regex": item.get("regex", ""), "prose": item.get("prose", ""),
                             "exempt": item.get("exempt") or []})
+            else:
+                _BAD.append("no `path` key: {0}".format(sorted(item)))
         elif item:
             out.append({"path": item, "mode": default_mode, "why": "", "use": "",
                         "regex": "", "prose": "", "exempt": []})
@@ -195,7 +199,7 @@ def main():
                 continue
             if _applies(e["mode"], tool) and any(t and e["path"] in t for t in texts):
                 csop.enforce(_FREEZE.get("action"), _path_msg(e))
-    csop.allow()
+    csop.dropped(_FREEZE.name, DISCIPLINE, _BAD)
 
 
 if __name__ == "__main__":

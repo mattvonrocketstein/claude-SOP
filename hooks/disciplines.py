@@ -202,6 +202,7 @@ class GenerativeHygiene(Discipline):
     codename = "hyg"
     name = "Generative Hygiene"
     default_enabled = True
+    requires = ("racc",)              # the gate only sees Edit/Write, so close the shell path
     max_comment_lines = 1             # >this added comment lines in a run -> reject
     notes_dir = "scratch/"            # externalize chain-of-thought here, not in code
     # prose file extensions: out of scope, since this gate judges code comments.
@@ -282,7 +283,9 @@ class GenerativeHygiene(Discipline):
                    "shout. Pushes "
                    "chain-of-thought out of code into a notes/spike doc under "
                    "`notes_dir`. Prose/notes files are out of scope. "
-                   "Language-agnostic; the rule lists are tunable.")
+                   "Language-agnostic; the rule lists are tunable. Requires Robot "
+                   "Accountability, since the gate sees only Edit and Write: an "
+                   "in-place shell write would otherwise bypass it.")
 
 
 class FrozenFeatures(Discipline):
@@ -511,8 +514,10 @@ class TechnicalWriter(Discipline):
     name = "Technical Writer"
     default_enabled = False
     requires = ("hyg",)               # implies Generative Hygiene is on (does not extend it)
-    banned = [chr(0x2014), "earns its keep"]   # rejected substrings (em-dash, a cliche)
-    discouraged = ["gate", "seam", "leverage", "seamless"]   # prose-only jargon: warned about, never blocked
+    banned = [chr(0x2014), "earns its keep", "fan-out",   # docs-code-ok
+              "byte-identical", "load-bearing", "genuinely", "seam"]   # docs-code-ok
+    discouraged = ["gate", "leverage",
+                   "substrate"]   # prose-only jargon: warned about, never blocked
     prose_globs = ["*.md", "*.markdown", "*.rst", "*.md.j2", "*.j2"]
     prose_rules = []             # project regexes for code leaking into doc prose
     token = "docs-code-ok"       # per-line opt-out marker in the doc source
@@ -535,13 +540,14 @@ class TechnicalWriter(Discipline):
     description = ("Clear technical writing: lead with the conclusion, stay concise "
                    "and concrete, prefer active voice, and structure with "
                    "headings/lists/examples. Enforced on added text: `banned` "
-                   "substrings (default the em-dash) in any file, plus `prose_rules` "
+                   "substrings, case-insensitive (the em-dash, a few cliches, and "
+                   "model tics), in any file, plus `prose_rules` "
                    "(project regexes) in `prose_globs` docs, where fenced blocks, "
                    "backtick spans, Jinja, HTML code regions, and tables are masked "
                    "first. A rule with `in_spans` also checks inside backticks; a "
                    "line carrying `token` opts out; `exempt` basenames are skipped. "
-                   "`discouraged` words (default `gate`, `seam`, `leverage`, "
-                   "`seamless`) warn in prose "
+                   "`discouraged` words (default `gate`, `leverage`, "
+                   "`substrate`) warn in prose "
                    "without ever blocking. prose_rules empty by default.")
 
 
@@ -598,6 +604,43 @@ class RobotAccountability(Discipline):
                    "robot counterpart to Human Accountability.")
 
 
+class MemoryAccountability(Discipline):
+    codename = "mem"
+    name = "Memory Accountability"
+    default_enabled = False
+    mode = "approval"                 # amnesiac | approval | visible
+    requires = ("racc",)              # the gate only sees Edit/Write, so close the shell path
+    paths = ["MEMORY.md", "CLAUDE.md", ".claude/CLAUDE.md",
+             "**/memory/**", "~/.claude/CLAUDE.md"]
+    allow_retraction = True           # removing a memory is the remedy, not the risk
+    excerpt_chars = 120               # cap on quoted memory text in a prompt or footer
+    overridable = ("default_enabled", "mode", "paths", "allow_retraction",
+                   "excerpt_chars", "nudge", "reminder")
+    append = ("nudge", "reminder", "paths")
+    nudge = ("Memory Accountability active (mode {mode}): writing a memory file is "
+             "the human's call. Never record an error, a flaky result, or a "
+             "single-run observation as a durable fact -- a wrong memory silently "
+             "outranks instructions in every later session. Say what you would "
+             "record and let the human decide.")
+    reminder = ("Memory Accountability follow-up: if a memory formed this turn on a "
+                "guess rather than a checked fact, retract it now while the "
+                "evidence is still at hand.")
+    description = ("Memory formation is a human decision, not a side effect. The "
+                   "discipline governs writes to the memory paths in `paths` "
+                   "(project and user CLAUDE.md, the memory directory) by `mode`. "
+                   "`amnesiac` denies the write. `approval` forces a confirmation "
+                   "prompt quoting the proposed text. `visible` allows the write "
+                   "and reports it in the end-of-turn modeline, so a memory can "
+                   "still form but never in silence. A retraction, an edit that "
+                   "only removes memory content, passes under `allow_retraction`, "
+                   "which keeps correcting a bad memory cheap. Note that `amnesiac` "
+                   "rests on deny, which the permission layer ignores under "
+                   "bypassPermissions; `approval` rests on ask, which overrides "
+                   "every permission mode, so it is the setting that holds "
+                   "everywhere. Gates: mem over Edit/Write, and a PostToolUse "
+                   "reporter that speaks whenever a memory write lands.")
+
+
 class Idiomatic(Discipline):
     codename = "idiom"
     name = "Idiomatic"
@@ -635,7 +678,7 @@ class FileTypeHooks(Discipline):
              "the file you just touched.")
     overridable = ("default_enabled", "types", "nudge")
     description = ("Per file type, inject a reminder and/or run a project command "
-                   "after an edit. Each `types` entry is a `match_globs` list with "
+                   "after an edit. Each `types` entry is a `match` list of globs with "
                    "an optional `reminder` (pure context injection) and an optional "
                    "`command` (a shell command; its captured output fed back to you). "
                    "`{file}` expands to the edited path in both. Empty by default; a "
@@ -648,7 +691,8 @@ DISCIPLINES = [IsoTree, HumanAccountability, RobotAccountability, Scratch,
                Promotion, GenerativeHygiene, FrozenFeatures, TestDrivenDevelopment,
                FeatureSpike, Performance, TacticalRetreat, Dreamer, Scientist,
                Stepwise, Consensus, Groomer, Toolsmith, TechnicalWriter,
-               EntrypointsSandbox, FileTypeHooks, Idiomatic]
+               EntrypointsSandbox, FileTypeHooks, Idiomatic,
+               MemoryAccountability]
 
 
 def by_codename(codename):

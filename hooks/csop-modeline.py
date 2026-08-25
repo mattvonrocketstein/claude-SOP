@@ -8,6 +8,7 @@ when every component is empty.
 """
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +17,9 @@ import disciplines  # noqa: E402
 
 GLYPH = "⬥"
 BRAND = "CSOP"
-TEE, ELBOW = "\u21b3 ", "\u21b3 "
+INNER = 54                    # content columns before the host wraps for us
+TOP, RAIL, FOOT = "\u250f", "\u2503", "\u2517"   # one box family: mixing families mixes metrics
+_ANSI = re.compile("\033\\[[0-9;]*m")
 
 
 def _c(code, text):
@@ -26,11 +29,36 @@ def _c(code, text):
     return "\033[{0}m{1}\033[0m".format(code, text)
 
 
+def _vis(text):
+    """Printed width: the string minus its styling, since padding must line the
+    rails up on what the reader sees, not on what the escape codes cost."""
+    return len(_ANSI.sub("", text))
+
+
+def _fill(tokens, width):
+    """Greedy fill into rows no wider than `width`, never splitting a token."""
+    rows, cur = [], ""
+    for tok in tokens:
+        cand = (cur + " " + tok) if cur else tok
+        if cur and _vis(cand) > width:
+            rows.append(cur)
+            cur = tok
+        else:
+            cur = cand
+    return rows + [cur] if cur else rows
+
+
 def _segment(label, items):
-    """Render one component: `Label: a,b,c`; "" when items is empty."""
+    """Render one component as box rows: `Label: a, b, c` on one row when it
+    fits, else the label alone and the list wrapped and indented beneath it."""
     if not items:
-        return ""
-    return "{0}: {1}".format(_c("36", label), _c("1", ", ".join(items)))
+        return []
+    toks = [it + ("," if i < len(items) - 1 else "")
+            for i, it in enumerate(items)]
+    head = "{0}: {1}".format(_c("36", label), " ".join(toks))
+    if _vis(head) <= INNER:
+        return [head]
+    return [_c("36", label) + ":"] + ["  " + r for r in _fill(toks, INNER - 2)]
 
 
 def _hint():
@@ -43,38 +71,49 @@ def _hint():
 # see the component model in the module docstring before adding one here.
 
 def _disciplines():
-    return _segment("Disciplines", sorted(csop.effective_active()))
+    return _segment("Active Disciplines",
+                    [_c("1", d) for d in sorted(csop.effective_active())])
 
 
 def _stages():
-    """When `pro` is active, every defined stage, the current one bracketed. The
-    brackets carry the meaning, not the color, since the app strips styling."""
+    """When `pro` is active, the stage the work is in. Only the current one: the
+    roster is what `/csop stage` prints, and the footer answers where you are."""
     if "pro" not in csop.effective_active() or csop.escaped("pro"):
-        return ""
-    names = list(csop.stages_config().keys())
-    if not names:
-        return ""
+        return []
+    if not csop.stages_config():
+        return []
     cur = csop.current_stage()
-    items = [_c("1;32", "[" + n + "]") if n == cur else _c("2", n) for n in names]
-    body = ", ".join(items) + ("" if cur else _c("2;3", "  (none current)"))
-    return "{0}: {1}".format(_c("36", "Stages"), body)
+    return ["{0} :: {1}".format(_c("36", "Active Stage"),
+                                _c("1;32", cur) if cur
+                                else _c("2;3", "(none current)"))]
 
 
-COMPONENTS = [_disciplines, _stages]
+COMPONENTS = [_disciplines]
+TAIL = [_stages]
 
 
 def render(extra=()):
-    """Assemble the footer: a head line, then every body line hung off it with a
-    box-drawing connector, so the block still reads as one unit after the host
-    prepends its own preamble. `extra` appends trailing body lines."""
-    body = [seg for seg in (component() for component in COMPONENTS) if seg]
-    body += [x for x in extra if x]
+    """Assemble the footer: a one-glyph gutter column, corner to rail to corner.
+    Every glyph comes from the heavy box family, which fonts ship complete or
+    not at all, so the column cannot bend the way a mixed set does. There is no
+    horizontal border, since no character that could draw one holds its width.
+    Wrapping happens here rather than in the host, which wraps at a fixed column
+    mid-word. `extra` appends rows."""
+    body = []
+    for component in COMPONENTS:
+        body += component()
+    for x in extra:
+        if x:
+            body += _fill(x.split(), INNER)
+    for component in TAIL:
+        body += component()
     if not body:
         return ""
-    head = "{0} {1} :: {2}".format(_c("33", GLYPH), _c("1;36", BRAND), _hint())
-    hung = [(ELBOW if i == len(body) - 1 else TEE) + line
-            for i, line in enumerate(body)]
-    return head + "\n" + "\n".join(hung)
+    lines = ["{0} :: {1}".format(_c("1;36", BRAND), _hint())] + body
+    return "\n".join(
+        "{0} {1}".format(TOP if i == 0 else FOOT if i == len(lines) - 1
+                         else RAIL, line)
+        for i, line in enumerate(lines))
 
 
 def _reminders():

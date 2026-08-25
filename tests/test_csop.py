@@ -61,6 +61,11 @@ def _project(cfg, files=None):
     return d
 
 
+def _wr(path, body):
+    """A Write tool event for `path`."""
+    return {"tool_name": "Write", "tool_input": {"file_path": path, "content": body}}
+
+
 def _bash(cmd):
     return {"tool_name": "Bash", "tool_input": {"command": cmd}}
 
@@ -203,12 +208,18 @@ class CliChecks(unittest.TestCase):
         head = out.strip().splitlines()[0]
         self.assertIn("/csop help", head)                   # the hint rides the head line
         self.assertNotIn("Usage:", out)                     # no usage list to drift
-        body = out.strip().splitlines()[1:]
-        lead = body[0][:2]
-        self.assertRegex(lead, r"^\W\s$")                   # a glyph plus a space
-        for line in body:
-            self.assertTrue(line.startswith(lead), line)    # every body line hangs alike
-        self.assertNotIn("(", body[0])                      # no parenthesis wrappers
+        lines = out.strip().splitlines()
+        for line in lines:
+            self.assertRegex(line[:2], r"^\W\s$")           # one glyph, then a space
+            self.assertLessEqual(len(line), 58)             # never long enough to wrap
+        gutter = {line[0] for line in lines}
+        self.assertLessEqual(len(gutter), 3)                # corner, rail, corner
+        for glyph in gutter:
+            self.assertLessEqual(0x2500, ord(glyph))        # all from one box family
+            self.assertLessEqual(ord(glyph), 0x257f)
+        for line in lines[1:-1]:
+            self.assertEqual(line[0], lines[1][0])          # one rail carries the middle
+        self.assertNotIn("(", lines[1])                     # no parenthesis wrappers
 
     def test_modeline_marks_the_current_stage(self):
         proj = _project({"stages": {"spike": {}, "core": {"from": ["spike"]}}})
@@ -225,13 +236,32 @@ class CliChecks(unittest.TestCase):
         self.assertIn("(none current)", render())      # no stage set yet
         _cli(["stage", "core"], env)
         out = render()
-        self.assertIn("[core]", out)                   # current stage is bracketed,
-        self.assertIn("spike", out)                    # the rest are still listed
-        self.assertNotIn("[spike]", out)               # and unmarked
+        self.assertIn("Active Stage :: core", out)     # the stage you are in,
+        self.assertNotIn("spike", out)                 # not the roster around it
+        self.assertEqual(out.strip().splitlines()[-1][2:],
+                         "Active Stage :: core")       # and it closes the footer
         self.assertNotIn("(none current)", out)
 
     def test_requires_closure(self):
         self.assertIn("hyg", _cli(["enable", "techwrite"], _env()).stdout.decode())
+
+    def test_disable_is_the_inverse_of_enable(self):
+        env = _env(); _cli(["enable", "iso"], env)
+        cp = _cli(["disable", "iso"], env)
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("disabled: iso", cp.stdout.decode())
+        self.assertNotIn("iso", _cli(["list"], env).stdout.decode())
+
+    def test_disable_drops_dependents_and_all(self):
+        env = _env(); _cli(["enable", "techwrite"], env)
+        out = _cli(["disable", "hyg"], env).stdout.decode()
+        self.assertIn("techwrite", out.split("disabled:")[1])   # requires hyg, so it goes too
+        _cli(["enable", "iso"], env)
+        self.assertEqual(_cli(["disable", "all"], env).returncode, 0)
+        self.assertEqual(_cli(["list"], env).stdout.decode().strip(), "active:")
+
+    def test_disable_of_an_inactive_discipline_is_an_error(self):
+        self.assertEqual(_cli(["disable", "iso"], _env()).returncode, 1)
 
 
 class GateChecks(unittest.TestCase):
@@ -321,7 +351,7 @@ class GateChecks(unittest.TestCase):
 
     def test_techwrite_discouraged_warns_without_denying(self):
         env = _env(); _cli(["enable", "techwrite"], env)
-        jargon = _edit(path="doc.md", old="x", new="the gate sits on a seam")
+        jargon = _edit(path="doc.md", old="x", new="the gate can leverage this")
         cp = _gate("csop-gate-techwrite.py", jargon, env)
         self.assertFalse(_denied(cp))
         self.assertIn(b"discouraged", cp.stdout)
@@ -329,6 +359,14 @@ class GateChecks(unittest.TestCase):
         self.assertNotIn(b"discouraged", _gate("csop-gate-techwrite.py", fenced, env).stdout)
         code = _edit(path="a.py", old="x", new="the gate runs")
         self.assertNotIn(b"discouraged", _gate("csop-gate-techwrite.py", code, env).stdout)
+
+    def test_techwrite_banned_tic_any_case(self):
+        env = _env(); _cli(["enable", "techwrite"], env)
+        tic = "load-" + "bearing"                # split so this source line stays clean
+        bad = _edit(path="a.py", old="x", new="# a " + tic.upper() + " assumption")
+        ok = _edit(path="a.py", old="x", new="# an assumption other code relies on")
+        self.assertTrue(_denied(_gate("csop-gate-techwrite.py", bad, env)))
+        self.assertFalse(_denied(_gate("csop-gate-techwrite.py", ok, env)))
 
     def test_techwrite_banned_phrase(self):
         env = _env(); _cli(["enable", "techwrite"], env)
@@ -405,7 +443,7 @@ class GateChecks(unittest.TestCase):
 
     def test_file_hooks_reminder(self):
         proj = _project({"file-hooks": {"default_enabled": True, "types": [
-            {"match_globs": ["*.sql"], "reminder": "use parameterized queries"}]}})
+            {"match": ["*.sql"], "reminder": "use parameterized queries"}]}})
         env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
         cp = _gate("csop-react-filehooks.py",
                    {"tool_name": "Write", "tool_input": {"file_path": "q.sql",
@@ -417,7 +455,7 @@ class GateChecks(unittest.TestCase):
 
     def test_file_hooks_reminder_file_token(self):
         proj = _project({"file-hooks": {"default_enabled": True, "types": [
-            {"match_globs": ["*.md"], "reminder": "regenerate {file} now"}]}})
+            {"match": ["*.md"], "reminder": "regenerate {file} now"}]}})
         env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
         cp = _gate("csop-react-filehooks.py",
                    {"tool_name": "Write", "tool_input": {"file_path": "docs/a.md",
@@ -426,7 +464,7 @@ class GateChecks(unittest.TestCase):
 
     def test_file_hooks_command_output_visible(self):
         proj = _project({"file-hooks": {"default_enabled": True, "types": [
-            {"match_globs": ["*.md"], "command": "echo linted {file}"}]}})
+            {"match": ["*.md"], "command": "echo linted {file}"}]}})
         env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
         cp = _gate("csop-react-filehooks.py",
                    {"tool_name": "Edit", "tool_input": {"file_path": "docs/readme.md",
@@ -437,7 +475,7 @@ class GateChecks(unittest.TestCase):
 
     def test_file_hooks_no_match_and_inactive(self):
         cfg = {"file-hooks": {"default_enabled": True, "types": [
-            {"match_globs": ["*.sql"], "reminder": "sql only"}]}}
+            {"match": ["*.sql"], "reminder": "sql only"}]}}
         proj = _project(cfg)
         ev = {"tool_name": "Write", "tool_input": {"file_path": "x.py", "content": "p"}}
         env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
@@ -445,6 +483,56 @@ class GateChecks(unittest.TestCase):
         env2 = _env(CLAUDE_PROJECT_DIR=proj)          # never enabled: fully inert
         sql = {"tool_name": "Write", "tool_input": {"file_path": "q.sql", "content": "s"}}
         self.assertNotIn("additionalContext", _gate("csop-react-filehooks.py", sql, env2).stdout.decode())
+
+    def test_file_hooks_malformed_entry_is_loud(self):
+        proj = _project({"file-hooks": {"default_enabled": True, "types": [
+            {"match_globs": ["*.sql"], "reminder": "sql only"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
+        cp = _gate("csop-react-filehooks.py",
+                   {"tool_name": "Write", "tool_input": {"file_path": "q.sql",
+                    "content": "select 1"}}, env)
+        out = cp.stdout.decode()
+        self.assertIn("malformed", out)               # a bad key never silently no-matches
+        self.assertIn("match_globs", out)             # the offending key is named
+
+    def test_idiom_malformed_rule_is_loud(self):
+        proj = _project({"idiom": {"default_enabled": True, "reject": [
+            {"regex": "foo", "message": "no foo"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "idiom"], env)
+        out = _gate("csop-gate-idiom.py",
+                    _wr("a.py", "foo\n"), env).stdout.decode()
+        self.assertIn("unusable config", out)
+        self.assertIn("pattern", out)
+
+    def test_techwrite_malformed_rule_is_loud(self):
+        proj = _project({"techwrite": {"default_enabled": True, "prose_rules": [
+            {"message": "code in prose"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "techwrite"], env)
+        out = _gate("csop-gate-techwrite.py",
+                    _wr("doc.md", "plain prose\n"), env).stdout.decode()
+        self.assertIn("unusable config", out)
+
+    def test_hyg_malformed_doc_region_is_loud(self):
+        proj = _project({"hyg": {"default_enabled": True, "doc_regions": [
+            {"begin": "'''", "end": "'''"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "hyg"], env)
+        out = _gate("csop-gate-hyg.py", _wr("a.py", "x = 1\n"), env).stdout.decode()
+        self.assertIn("unusable config", out)
+
+    def test_freeze_malformed_entry_is_loud(self):
+        proj = _project({"freeze": {"default_enabled": True, "frozen": [
+            {"file": "vendor/", "why": "generated"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "freeze"], env)
+        out = _gate("csop-gate-pathblock.py", _wr("a.py", "x = 1\n"), env).stdout.decode()
+        self.assertIn("unusable config", out)
+        self.assertIn("path", out)
+
+    def test_wellformed_config_stays_quiet(self):
+        proj = _project({"idiom": {"default_enabled": True, "reject": [
+            {"pattern": "zzz", "message": "no zzz"}]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "idiom"], env)
+        out = _gate("csop-gate-idiom.py", _wr("a.py", "fine\n"), env).stdout.decode()
+        self.assertNotIn("unusable config", out)
 
     def test_racc_visible_edits(self):
         env = _env(); _cli(["enable", "racc"], env)
@@ -792,6 +880,46 @@ class GateChecks(unittest.TestCase):
         second = _gate("csop-modeline.py", stop, env).stdout.decode()
         self.assertIn("disabled", first)                 # one-time notice
         self.assertNotIn("disabled", second)             # drained after one show
+
+    def test_disarm_blocks_every_agent_route(self):
+        env = _env(); _cli(["enable", "iso"], env)
+        cli = os.path.join(HOOKS, "csop.py")
+        state = os.path.join(env["CLAUDE_PLUGIN_DATA"], "active.json")
+        for cmd in ('python3 %s disable iso && echo ok' % cli,         # chained: not canonical
+                    'python3 %s reset' % cli,
+                    'CLAUDE_PLUGIN_DATA=/tmp/x python3 %s list' % cli,
+                    'echo [] > %s' % state,
+                    'rm %s' % state,
+                    'python3 %s enable groom' % cli):                  # groom conflicts iso
+            with self.subTest(cmd=cmd):
+                cp = _gate("csop-gate-disarm.py", _bash(cmd), env)
+                self.assertEqual(cp.returncode, 2, cp.stdout + cp.stderr)
+        cp = _gate("csop-gate-disarm.py", _edit(state), env)
+        self.assertEqual(cp.returncode, 2)
+
+    def test_disarm_escalates_the_slash_command_form_to_the_human(self):
+        env = _env(); _cli(["enable", "iso"], env)
+        cli = os.path.join(HOOKS, "csop.py")
+        for cmd in ('python3 "%s" disable iso' % cli,    # the command body, quoted
+                    "python3 %s disable all" % cli):
+            with self.subTest(cmd=cmd):
+                cp = _gate("csop-gate-disarm.py", _bash(cmd), env)
+                self.assertEqual(cp.returncode, 0)
+                self.assertIn('"ask"', cp.stdout.decode())   # sign-off, not a free pass
+
+    def test_disarm_ignores_everything_else(self):
+        env = _env()
+        for cmd in ("python3 %s list" % os.path.join(HOOKS, "csop.py"),
+                    "grep -rn disable hooks/", "make test"):
+            with self.subTest(cmd=cmd):
+                cp = _gate("csop-gate-disarm.py", _bash(cmd), env)
+                self.assertEqual(cp.returncode, 0, cp.stderr)
+                self.assertNotIn('"ask"', cp.stdout.decode())
+
+    def test_disarm_is_always_on_with_no_escape_hatch(self):
+        env = _env(CSOP_DISARM="off"); _cli(["enable", "iso"], env)
+        cmd = "python3 %s reset" % os.path.join(HOOKS, "csop.py")
+        self.assertEqual(_gate("csop-gate-disarm.py", _bash(cmd), env).returncode, 2)
 
 
 class StageChecks(unittest.TestCase):

@@ -4,8 +4,7 @@ description: Awareness and management for CSOP process disciplines (SOPs). Invok
 ---
 # Disciplines (SOPs)
 
-A **discipline** is a process-level protocol (a components of a SOP) which is enforced deterministically by hooks. Disciplines are **toggleable**: enable one per session and it latches
-active until `/clear`; there is no mid-session disable. Each has a **name** (e.g.
+A **discipline** is a process-level protocol (a components of a SOP) which is enforced deterministically by hooks. Disciplines are **toggleable**: enable one per session. Each has a **name** (e.g.
 `IsolatedTree`), a **description**, and a **codename** (e.g. `iso`).
 
 ## Managing disciplines
@@ -13,8 +12,7 @@ active until `/clear`; there is no mid-session disable. Each has a **name** (e.g
 `/discipline` (aliases `/csop`, `/disc`) forwards its arguments VERBATIM to the
 one CLI, so `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
 
-- `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`);
-  sticky until `/clear`.
+- `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`).
 - `list`: show active disciplines (also the no-arg default).
 - `catalog`: list all known disciplines.
 - Disarm all: `/clear`.

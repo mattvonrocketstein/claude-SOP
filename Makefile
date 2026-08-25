@@ -31,12 +31,15 @@ RESET :=
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help init install test validate ci check clean version-check
+.PHONY: help init install test validate ci check clean version-check update.siblings
+
+# Where `update.siblings` looks for consumer projects; override on the CLI.
+SIBLING_ROOT ?= $(HOME)/code
 
 help: ## Show available targets
 	@echo "$(BOLD)CSOP make targets$(RESET)"
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  $(CYAN)%-7s$(RESET) %s\n",$$1,$$2}'
+	@grep -E '^[a-zA-Z_.-]+:.*?## ' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  $(CYAN)%-16s$(RESET) %s\n",$$1,$$2}'
 
 version-check: ## Verify Claude Code is new enough for ${CLAUDE_PROJECT_DIR} in slash commands
 	@if [ -n "$(SKIP_VERSION_CHECK)" ]; then echo "$(GREEN)skip:$(RESET) version check (SKIP_VERSION_CHECK set)"; exit 0; fi; \
@@ -92,6 +95,28 @@ validate: ## Static sanity: hooks parse + configs valid (json / jsonc)
 	@$(PY) -m unittest -v tests.test_csop.StaticChecks
 
 ci: validate check ## Run the full offline CI gate (validate + check)
+
+update.siblings: ## Fetch+pull every .claude/csop submodule under ~/code (SIBLING_ROOT)
+	@root="$(SIBLING_ROOT)"; \
+	 [ -d "$$root" ] || { echo "$(RED)error:$(RESET) $$root is not a directory (override with SIBLING_ROOT=<path>)"; exit 1; }; \
+	 echo "$(BOLD)scanning$(RESET) $$root for .claude/csop submodules"; \
+	 found=0; ok=0; fail=0; \
+	 while IFS= read -r d; do \
+	   git -C "$$d" rev-parse --git-dir >/dev/null 2>&1 || continue; \
+	   super="$$(git -C "$$d" rev-parse --show-superproject-working-tree 2>/dev/null)"; \
+	   [ -n "$$super" ] || { echo "  $(DIM)skip$(RESET)  $$d (not a submodule)"; continue; }; \
+	   found=$$((found+1)); \
+	   if out="$$(git -C "$$d" fetch 2>&1 && git -C "$$d" pull 2>&1)"; then \
+	     ok=$$((ok+1)); \
+	     echo "  $(GREEN)ok$(RESET)    $$d"; \
+	   else \
+	     fail=$$((fail+1)); \
+	     echo "  $(RED)fail$(RESET)  $$d"; \
+	     printf '%s\n' "$$out" | sed 's/^/        /'; \
+	   fi; \
+	 done < <(find "$$root" -type d -name .claude -not -path '*/.git/*' -exec test -d '{}/csop' \; -print 2>/dev/null | sed 's#$$#/csop#' | sort); \
+	 echo "$(BOLD)done$(RESET) $$found submodule(s): $(GREEN)$$ok ok$(RESET), $(RED)$$fail failed$(RESET)"; \
+	 [ "$$fail" -eq 0 ]
 
 clean: ## Remove generated discovery surface + local state
 	@rm -f -- .claude/commands/*.md 2>/dev/null || true

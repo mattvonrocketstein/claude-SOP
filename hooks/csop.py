@@ -73,6 +73,15 @@ def enable(codename):
     return cur
 
 
+def disable(codenames):
+    """Drop already-resolved codenames from the active set, the inverse of enable.
+    Disarming, so csop-gate-disarm keeps every agent-reachable route to it shut:
+    only the human channel gets here (see docs/gate-internals.md)."""
+    new = active() - set(codenames)
+    reset(new)
+    return new
+
+
 def reset(codenames):
     """Set the active set to `codenames` (SessionStart seeds the default-enabled
     set, so /clear|startup re-seeds defaults rather than wiping to empty)."""
@@ -109,6 +118,37 @@ def drain_notices():
     except OSError:
         pass
     return data
+
+
+def pend(key, text):
+    """Hold `text` for a later hook in the same tool call, keyed by `key`. A
+    PostToolUse hook cannot recover what a write added, since the file already
+    holds it, so the PreToolUse side records it here."""
+    path = state_path("pending.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        data = {}
+    data[key] = text
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+
+def take(key):
+    """Pop the value `pend` stored under `key`, or None."""
+    path = state_path("pending.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        return None
+    val = data.pop(key, None)
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+    return val
 
 
 # ---- project config override -----------------------------------------------
@@ -335,6 +375,88 @@ def writable_verdict(path):
     return "deny"
 
 
+def path_matches(path, globs):
+    """True if `path` matches any glob, comparing repo-relative and absolute forms
+    so an entry may be written either way. A leading `~` in a glob expands, which
+    is how a user-level path outside the project is addressed."""
+    p = os.path.abspath(os.path.expanduser(path or "")).replace("\\", "/")
+    root = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    rel = os.path.relpath(p, root).replace("\\", "/") if p.startswith(root) else p
+    for g in globs or []:
+        g = os.path.expanduser(g).replace("\\", "/")
+        if _match_globs(rel, [g]) or _match_globs(p, [g]):
+            return True
+    return False
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def oneline(text, limit=120):
+    """Collapse `text` to a single sanitized line of at most `limit` characters.
+    Stripping control bytes matters wherever the result joins styled output: a
+    stray escape sequence in the source would otherwise scramble the whole block."""
+    flat = _CONTROL.sub(" ", text or "").strip()
+    flat = re.sub(r"\s+", " ", flat)
+    return flat if len(flat) <= limit else flat[:max(0, limit - 1)].rstrip() + "…"
+
+
+def write_target(tool, tool_input):
+    """The file a write-family tool call targets, or "" for anything else."""
+    ti = tool_input or {}
+    if tool in ("Edit", "Write", "MultiEdit"):
+        return ti.get("file_path", "") or ""
+    if tool == "NotebookEdit":
+        return ti.get("notebook_path", "") or ""
+    return ""
+
+
+def added_text(tool, tool_input, path="", subtract_prior=True):
+    """The text a write-family call introduces: the new content of a Write, or the
+    replacement side of each edit. Empty means the call only removes text, which is
+    how a gate tells a retraction from an addition. A Write subtracts the file's
+    current lines, which a PreToolUse caller wants and a PostToolUse one must turn
+    off, since by then the file already holds what was written."""
+    ti = tool_input or {}
+    if tool == "Write":
+        new = ti.get("content", "") or ""
+        if not subtract_prior:
+            return new
+        old = ""
+        p = path or ti.get("file_path", "") or ""
+        if p and not os.path.isabs(p):
+            p = os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()), p)
+        try:
+            with open(os.path.expanduser(p), encoding="utf-8", errors="replace") as f:
+                old = f.read()
+        except Exception:
+            old = ""
+        prior = set(old.splitlines())
+        return "\n".join(ln for ln in new.splitlines() if ln.strip() and ln not in prior)
+    if tool == "Edit":
+        return ti.get("new_string", "") or ""
+    if tool == "MultiEdit":
+        return "\n".join(e.get("new_string", "") or "" for e in (ti.get("edits") or []))
+    if tool == "NotebookEdit":
+        return ti.get("new_source", "") or ""
+    return ""
+
+
+_DESC = re.compile(r"^\s*description:\s*(.+)$", re.MULTILINE)
+
+
+def gist(text, limit=120):
+    """A one-line summary of added memory text: the frontmatter `description`
+    when the text carries one, else its first meaningful line."""
+    m = _DESC.search(text or "")
+    if m:
+        return oneline(m.group(1), limit)
+    for line in (text or "").splitlines():
+        if line.strip() and line.strip() not in ("---",):
+            return oneline(line, limit)
+    return ""
+
+
 _STAGE_DISABLE = ("false", "no", "disabled", "off")
 
 
@@ -468,6 +590,20 @@ def nudge(text, event_name="PreToolUse"):
     sys.exit(0)
 
 
+def dropped(name, codename, bad):
+    """Report unusable project config entries a gate discarded, then allow. A
+    dropped rule never fires and looks exactly like one that did not match, so an
+    inert gate would otherwise read as a passing one. Each item in `bad` says why
+    that entry was unusable. Call on the allow path: a real finding outranks a
+    config complaint."""
+    if not bad:
+        allow()
+    nudge("{0} ({1}): dropped {2} unusable config entr{3} ({4}). Those rules are "
+          "inert until .claude/csop.json is fixed.".format(
+              name, codename, len(bad), "y" if len(bad) == 1 else "ies",
+              "; ".join(bad)))
+
+
 def _decide(decision, reason):
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
@@ -522,7 +658,8 @@ def _new_nudges(before):
 
 _USAGE = """csop.py <command>
 
-  enable <name|codename>   activate a discipline for this session (until /clear)
+  enable <name|codename>   activate a discipline for this session
+  disable <name|all>       deactivate one, or every active discipline
   list                     the active disciplines (the no-argument default)
   catalog                  every discipline, with codename and description
   stage [<name>]           show the current stage, or make <name> current
@@ -531,7 +668,36 @@ _USAGE = """csop.py <command>
   help                     this text
 
 Slash commands forward verbatim: /csop, /disc, and /discipline take any of the
-above; /stage, /promote, and /demote are shorthands for their verbs."""
+above; /stage, /promote, and /demote are shorthands for their verbs, as
+/csop-disable is for `disable`. Disarming a discipline is human-only: run it
+from a slash command, never from the agent's shell (see csop-gate-disarm)."""
+
+
+def enable_drops(token):
+    """What `enable <token>` would switch off: (direct, cascade) sets of currently
+    active codenames, the conflicts of the enabled closure and everything that
+    requires them. Non-empty means the enable is also a disarm, which is why
+    csop-gate-disarm consults this before letting an agent run one."""
+    import disciplines
+    target = disciplines.closure({disciplines.resolve(token)})
+    drop = set()
+    for cn in target:
+        drop |= disciplines.conflicts(cn)
+    drop -= target
+    cur = active()
+    direct = cur & drop
+    return direct, cur & disciplines.dependents(direct)
+
+
+def disable_drops(token):
+    """What `disable <token>` would switch off: the currently active codenames the
+    token names, plus everything that requires them. `all` means the whole set."""
+    import disciplines
+    cur = active()
+    if token.lower() == "all":
+        return set(cur)
+    rid = disciplines.resolve(token)
+    return ({rid} | disciplines.dependents({rid})) & cur
 
 
 def _cli(argv):
@@ -541,15 +707,9 @@ def _cli(argv):
     if argv[:1] == ["enable"] and len(argv) >= 2 and not argv[1].startswith("-"):
         rid = disciplines.resolve(argv[1])
         target = disciplines.closure({rid})
-        drop = set()
-        for cn in target:
-            drop |= disciplines.conflicts(cn)
-        drop -= target
-        cur = active()
-        direct = cur & drop
-        cascade = cur & disciplines.dependents(direct)
+        direct, cascade = enable_drops(argv[1])
         removed = direct | cascade
-        new = (cur | target) - removed
+        new = (active() | target) - removed
         reset(new)
         if removed:
             def _name(c):
@@ -566,6 +726,15 @@ def _cli(argv):
         print("active: " + " ".join(sorted(new)))
         if removed:
             print("disabled: " + " ".join(sorted(removed)))
+        return 0
+    if argv[:1] == ["disable"] and len(argv) >= 2 and not argv[1].startswith("-"):
+        removed = disable_drops(argv[1])
+        if not removed:
+            print("not active: {0}".format(argv[1]), file=sys.stderr)
+            return 1
+        new = disable(removed)
+        print("active: " + " ".join(sorted(new)))
+        print("disabled: " + " ".join(sorted(removed)))
         return 0
     if argv[:1] == ["stage"]:
         if len(argv) >= 2 and not argv[1].startswith("-"):
