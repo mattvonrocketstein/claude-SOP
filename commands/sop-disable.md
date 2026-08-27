@@ -1,5 +1,5 @@
 ---
-description: CSOP -- deactivate a discipline (or `all`). Human-only, the inverse of `/csop enable`.
+description: CSOP -- deactivate a discipline (or `all`). Human-only, the inverse of `/sop enable`.
 argument-hint: "<name|codename|all>"
 allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" *)
 disable-model-invocation: true

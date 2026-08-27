@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""PostToolUse gate: File-Type Hooks (codename `file-hooks`).
+"""PostToolUse gate: Filetypes (codename `ftypes`).
 
 After an edit, for each project `types` entry whose globs match the file, inject
 that entry's `reminder` and, if it has a `command`, run it and feed the captured
 output back to the model. That capture is the only way the model sees a command's
-output. Empty by default. Fail-open; escape hatch CSOP_FILE_HOOKS=off.
+output. Empty by default. Fail-open; escape hatch CSOP_FTYPES=off.
 """
 import fnmatch
 import os
@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import csop  # noqa: E402
 import disciplines  # noqa: E402
 
-_D = disciplines.FileTypeHooks
+_D = disciplines.Filetypes
 DISCIPLINE = _D.codename
 _WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 _LIMIT = 4000
@@ -71,7 +71,7 @@ def main():
                 msgs.append(out)
     if not msgs:
         csop.allow()
-    csop.nudge("File-Type Hooks ({0}) for `{1}`:\n{2}".format(
+    csop.nudge("Filetypes ({0}) for `{1}`:\n{2}".format(
         DISCIPLINE, fp, "\n".join(msgs)), "PostToolUse")
 
 

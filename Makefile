@@ -60,15 +60,13 @@ init: version-check ## Enable CSOP in this repo (self-host)
 	@if [ -f .claude/csop.json ]; then $(PY) -c "import sys;sys.path.insert(0,'hooks');import csop;csop.loads_jsonc(open('.claude/csop.json').read())" \
 	  && echo "$(GREEN)validated:$(RESET) project config (json5)"; fi
 	@for f in hooks/*.py; do $(PY) -c "import ast;ast.parse(open('$$f').read())" || exit 1; done; echo "$(GREEN)validated:$(RESET) hooks parse"
-	@mkdir -p .claude/commands
-	@cp -f commands/*.md .claude/commands/
-	@sed -i 's#$${CLAUDE_PLUGIN_ROOT}#$${CLAUDE_PROJECT_DIR}#g' .claude/commands/*.md
+	@$(PY) tools/sync_commands.py commands .claude/commands .
 	@echo "$(GREEN)materialized$(RESET) project commands -> .claude/commands/ (CLAUDE_PROJECT_DIR-anchored; needs Claude Code v2.1.196+)"
 	@echo ""
 	@echo "$(BOLD)CSOP is initialized for this repo:$(RESET)"
 	@echo "  * $(CYAN)hooks$(RESET)   : wired in .claude/settings.json (approve workspace trust next session)"
-	@echo "  * $(CYAN)enable$(RESET)  : /csop enable iso        (or bare: $(PY) hooks/csop.py enable iso)"
-	@echo "  * $(CYAN)inspect$(RESET) : /csop  |  /csop catalog"
+	@echo "  * $(CYAN)enable$(RESET)  : /sop enable iso         (or bare: $(PY) hooks/csop.py enable iso)"
+	@echo "  * $(CYAN)inspect$(RESET) : /sop  |  /sop catalog"
 
 install: version-check ## Wire CSOP into a consumer project (run from a submodule checkout)
 	@root="$${DEST:-$$(git rev-parse --show-superproject-working-tree 2>/dev/null)}"; \
@@ -76,14 +74,15 @@ install: version-check ## Wire CSOP into a consumer project (run from a submodul
 	 rel="$$($(PY) -c 'import os,sys;print(os.path.relpath(os.path.realpath(os.getcwd()),os.path.realpath(sys.argv[1])))' "$$root")"; \
 	 mkdir -p "$$root/.claude/commands"; \
 	 merged="$$($(PY) tools/merge_settings.py "$$root/.claude/settings.json" "$$rel" hooks/hooks.json)"; \
-	 for f in commands/*.md; do sed "s#\$${CLAUDE_PLUGIN_ROOT}#\$${CLAUDE_PROJECT_DIR}/$$rel#g" "$$f" > "$$root/.claude/commands/$$(basename "$$f")"; done; \
+	 cmdlog="$$($(PY) tools/sync_commands.py commands "$$root/.claude/commands" "$$rel")" || exit 1; \
 	 gi="$$root/.gitignore"; \
 	 if [ -f "$$gi" ] && grep -qxF ".claude/csop-state/" "$$gi"; then gi_st="already ignored"; else printf '%s\n' ".claude/csop-state/" >> "$$gi"; gi_st="added .claude/csop-state/ (runtime state)"; fi; \
 	 printf '\n$(BOLD)CSOP installed$(RESET) into %s\n\n$(BOLD)changed$(RESET)\n' "$$root"; \
 	 printf '  %-24s %s\n' ".claude/settings.json" "merged CSOP hooks and permissions.allow ($$merged), preserving your settings"; \
-	 printf '  %-24s %s\n' ".claude/commands/" "wrote /csop, /disc, /discipline"; \
+	 printf '  %-24s %s\n' ".claude/commands/" "synced (a command CSOP has retired is pruned; anything else is left alone)"; \
+	 printf '%s\n' "$$cmdlog"; \
 	 printf '  %-24s %s\n' ".gitignore" "$$gi_st"; \
-	 printf '\nActive on your next Claude Code session here. hacc, scratch, hyg are on by default; %s adds more.\n' "$(CYAN)/csop enable <name>$(RESET)"
+	 printf '\nActive on your next Claude Code session here. hacc, scratch, hyg are on by default; %s adds more.\n' "$(CYAN)/sop enable <name>$(RESET)"
 
 test: ## Run the offline test suite (tests/test_csop.py)
 	@$(PY) -m unittest -v tests.test_csop

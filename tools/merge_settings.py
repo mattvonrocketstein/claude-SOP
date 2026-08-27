@@ -3,7 +3,7 @@
 
 Syncs rather than appends, so re-running is safe: it drops hook entries pointing
 into our hooks dir, adds the current set, and unions the permissions that
-pre-approve the /csop CLI. The consumer's own settings are preserved.
+pre-approve the /sop CLI. The consumer's own settings are preserved.
 Usage: merge_settings.py <settings.json> <rel-path-to-plugin> <our-hooks.json>
 """
 import json

@@ -48,6 +48,23 @@ def _fill(tokens, width):
     return rows + [cur] if cur else rows
 
 
+def _balance(tokens, width):
+    """Fill into the same number of rows `_fill` needs, but at the narrowest
+    width that still reaches that count, so the rows come out near-even instead
+    of one long row and a short remainder."""
+    rows = _fill(tokens, width)
+    if len(rows) < 2:
+        return rows
+    lo, hi = max(_vis(t) for t in tokens), width
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if len(_fill(tokens, mid)) <= len(rows):
+            hi = mid
+        else:
+            lo = mid + 1
+    return _fill(tokens, lo)
+
+
 def _segment(label, items):
     """Render one component as box rows: `Label: a, b, c` on one row when it
     fits, else the label alone and the list wrapped and indented beneath it."""
@@ -58,13 +75,13 @@ def _segment(label, items):
     head = "{0}: {1}".format(_c("36", label), " ".join(toks))
     if _vis(head) <= INNER:
         return [head]
-    return [_c("36", label) + ":"] + ["  " + r for r in _fill(toks, INNER - 2)]
+    return [_c("36", label) + ":"] + ["  " + r for r in _balance(toks, INNER - 2)]
 
 
 def _hint():
     """A dimmed pointer to the CLI's own help, rather than a usage line the
     footer would have to keep in sync with the CLI."""
-    return _c("2", "Use ") + _c("2;3", "/csop help") + _c("2", " for details.")
+    return _c("2", "Use ") + _c("2;3", "/sop help") + _c("2", " for details.")
 
 
 # ---- components -------------------------------------------------------------
@@ -77,7 +94,7 @@ def _disciplines():
 
 def _stages():
     """When `pro` is active, the stage the work is in. Only the current one: the
-    roster is what `/csop stage` prints, and the footer answers where you are."""
+    roster is what `/sop stage` prints, and the footer answers where you are."""
     if "pro" not in csop.effective_active() or csop.escaped("pro"):
         return []
     if not csop.stages_config():
@@ -104,7 +121,7 @@ def render(extra=()):
         body += component()
     for x in extra:
         if x:
-            body += _fill(x.split(), INNER)
+            body += _balance(x.split(), INNER)
     for component in TAIL:
         body += component()
     if not body:

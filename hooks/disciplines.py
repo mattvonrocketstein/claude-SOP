@@ -111,7 +111,7 @@ class IsoTree(Discipline):
     overridable = ("default_enabled", "home", "nudge", "reminder")
     description = ("Risky/exploratory/experimental changes to a project's core "
                   "must be prototyped in an isolated git worktree (an 'iso-tree') "
-                  "under the crash-safe, in-repo, gitignored `dir` (default "
+                  "under the crash-safe, in-repo, gitignored `home` (default "
                   "scratch/iso/), never /tmp. Prove against tests there, then "
                   "port the diff back to core. Enforced: worktree-add must target "
                   "the iso dir, and the first write into a tree not created fresh "
@@ -185,12 +185,12 @@ class Promotion(Discipline):
     name = "Promotion"
     default_enabled = False
     nudge = ("Promotion active: work flows forward through stages. Declare the "
-                "stage you are in with `/csop stage <name>`, and enter a later "
+                "stage you are in with `/sop stage <name>`, and enter a later "
                 "stage only as a promotion from one of its `from` sources. New work "
                 "starts in an entry stage (a demo or an iso tree), not in core.")
     overridable = ("default_enabled", "nudge")
     description = ("Staged promotion flow over the top-level `stages` map. One "
-                   "current stage per session (a sticky latch set by `/csop stage`, "
+                   "current stage per session (a sticky latch set by `/sop stage`, "
                    "seeded from a stage's `default_stage`), a `from`-DAG of legal "
                    "sources, and per-stage `pre`/`post` prompts. Entering a stage "
                    "with no active `from` source fires its `pre`; `post` fires after "
@@ -245,7 +245,13 @@ class GenerativeHygiene(Discipline):
                 "GPU", "RAM", "OS", "DB", "SQL", "XML", "YAML", "CSV", "PDF",
                 "CSS", "AWS", "GCP", "IAM", "ACL", "CRUD", "REST", "JWT", "CI",
                 "CD", "QA", "UI", "UX", "EOF", "EOL", "PR", "TTY", "PID", "PATH",
-                "DAG", "JSONC", "SVG", "PNG", "PDF", "ENV", "DIR", "CWD"]
+                "DAG", "DAGS", "JSONC", "JSONL", "NDJSON", "TOML", "SVG", "PNG",
+                "JPEG", "JS", "ENV", "DIR", "CWD", "SRC", "TUI", "REPL",
+                "DSL", "IR", "IO", "FD", "FFI", "FQN", "ETL", "OOP", "LIFO",
+                "FIFO", "DFS", "BFS", "LHS", "RHS", "ERE", "GNU", "POSIX", "OSX",
+                "XDG", "SIGINT", "SIGTERM", "TERM", "SHELL", "HOME", "STDIN",
+                "STDOUT", "STDERR", "AWK", "SED", "JQ", "YQ", "MAKEFLAGS",
+                "MAKELEVEL"]
     # line-shaped documentation prefixes: the doc budget, not the comment one.
     doc_prefixes = ["##", "///"]
     doc_regions = [{"open": r'^\s*("""|\'\'\')', "close": r'"""|\'\'\''},
@@ -667,12 +673,12 @@ class Idiomatic(Discipline):
                    "over Edit/Write/MultiEdit.")
 
 
-class FileTypeHooks(Discipline):
-    codename = "file-hooks"
-    name = "File-Type Hooks"
+class Filetypes(Discipline):
+    codename = "ftypes"
+    name = "Filetypes"
     default_enabled = False
     types = []                        # [{match:[globs], reminder?, command? (with {file})}]
-    nudge = ("File-Type Hooks active: editing certain file types triggers a "
+    nudge = ("Filetypes active: editing certain file types triggers a "
              "per-type reminder or a project command whose output comes back to "
              "you after the edit. Treat that returned output as ground truth for "
              "the file you just touched.")
@@ -683,7 +689,7 @@ class FileTypeHooks(Discipline):
                    "`command` (a shell command; its captured output fed back to you). "
                    "`{file}` expands to the edited path in both. Empty by default; a "
                    "project sets it. Runs on PostToolUse, the only event that can "
-                   "return command output to the model. Gate: file-hooks over "
+                   "return command output to the model. Gate: ftypes over "
                    "Edit/Write/MultiEdit/NotebookEdit.")
 
 
@@ -691,7 +697,7 @@ DISCIPLINES = [IsoTree, HumanAccountability, RobotAccountability, Scratch,
                Promotion, GenerativeHygiene, FrozenFeatures, TestDrivenDevelopment,
                FeatureSpike, Performance, TacticalRetreat, Dreamer, Scientist,
                Stepwise, Consensus, Groomer, Toolsmith, TechnicalWriter,
-               EntrypointsSandbox, FileTypeHooks, Idiomatic,
+               EntrypointsSandbox, Filetypes, Idiomatic,
                MemoryAccountability]
 
 

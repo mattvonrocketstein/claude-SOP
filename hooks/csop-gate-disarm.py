@@ -24,10 +24,10 @@ _CANONICAL = re.compile(r"^\s*(?:python[0-9.]*\s+)?[\"']?\S*csop\.py[\"']?"
 _WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
 _ASK = ("CSOP: `{0}` disarms a discipline. Approve only if you just ran a "
-        "/csop-disable or /csop disable slash command yourself. If the agent "
+        "/sop-disable or /sop disable slash command yourself. If the agent "
         "asked for this, deny it: disciplines are not the agent's to switch off.")
 _BLOCK = ("CSOP disarm rail: {0}. Disabling a discipline is the human's call, not "
-          "yours. Ask them to run `/csop-disable <name>`; do not retry, and do not "
+          "yours. Ask them to run `/sop-disable <name>`; do not retry, and do not "
           "route around this by editing state, relocating it, or enabling a "
           "conflicting discipline. This rail is always on and has no escape hatch.")
 

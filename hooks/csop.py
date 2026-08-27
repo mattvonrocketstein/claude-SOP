@@ -667,10 +667,10 @@ _USAGE = """csop.py <command>
   demote [<name>]          move back to a source stage
   help                     this text
 
-Slash commands forward verbatim: /csop, /disc, and /discipline take any of the
-above; /stage, /promote, and /demote are shorthands for their verbs, as
-/csop-disable is for `disable`. Disarming a discipline is human-only: run it
-from a slash command, never from the agent's shell (see csop-gate-disarm)."""
+Slash commands forward verbatim: /sop takes any of the above; /stage, /promote,
+and /demote are shorthands for their verbs, as /sop-disable is for `disable`.
+Disarming a discipline is human-only: run it from a slash command, never from
+the agent's shell (see csop-gate-disarm)."""
 
 
 def enable_drops(token):

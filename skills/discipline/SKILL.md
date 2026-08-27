@@ -9,8 +9,8 @@ A **discipline** is a process-level protocol (a components of a SOP) which is en
 
 ## Managing disciplines
 
-`/discipline` (aliases `/csop`, `/disc`) forwards its arguments VERBATIM to the
-one CLI, so `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
+`/sop` forwards its arguments VERBATIM to the one CLI, so `/sop <args>` ≡
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
 
 - `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`).
 - `list`: show active disciplines (also the no-arg default).

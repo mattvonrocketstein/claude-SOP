@@ -40,7 +40,7 @@ def main():
     if csop.writable_verdict(fp) == "deny":    # spatial guard: editing ahead of the stage
         fs = csop.stage_of(fp)
         csop.deny("Promotion ({0}) [{1}]: `{2}` belongs to stage `{3}`, outside "
-                  "what `{1}` may write. Switch with `/csop stage {3}` (promoting "
+                  "what `{1}` may write. Switch with `/sop stage {3}` (promoting "
                   "from its sources), or edit within `{1}`. Escape hatch: "
                   "CSOP_PRO=off.".format(DISCIPLINE, cs, fp, fs))
 

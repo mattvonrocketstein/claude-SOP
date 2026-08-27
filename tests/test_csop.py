@@ -18,10 +18,17 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(ROOT, "hooks")
 sys.path.insert(0, HOOKS)
-import csop          # noqa: E402
-import disciplines   # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import csop            # noqa: E402
+import disciplines     # noqa: E402
+import sync_commands   # noqa: E402
 
 EM_DASH = chr(8212)
+
+# a command file shaped the way sync_commands writes them
+_CMD = ('---\ndescription: t\nallowed-tools: Bash(python3 '
+        '"${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" *)\n---\n'
+        '!`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" $ARGUMENTS`\n%s')
 
 
 def _env(**extra):
@@ -140,7 +147,7 @@ class ConfigChecks(unittest.TestCase):
             cfg = json.load(f)
         self.assertIn("Bash(ls *)", cfg["permissions"]["allow"])              # preserved
         self.assertIn('Bash(python3 "${CLAUDE_PROJECT_DIR}/.claude/csop/hooks/csop.py" *)',
-                      cfg["permissions"]["allow"])                            # pre-approves /csop, cwd-safe
+                      cfg["permissions"]["allow"])                            # pre-approves /sop, cwd-safe
         self.assertTrue(cfg["hooks"]["PreToolUse"])                          # our hooks merged
         before = json.dumps(cfg, sort_keys=True)
         run()
@@ -206,7 +213,7 @@ class CliChecks(unittest.TestCase):
                  HOOKS, os.path.join(HOOKS, "csop-modeline.py"))],
             capture_output=True, cwd=ROOT, env=env).stdout.decode()
         head = out.strip().splitlines()[0]
-        self.assertIn("/csop help", head)                   # the hint rides the head line
+        self.assertIn("/sop help", head)                   # the hint rides the head line
         self.assertNotIn("Usage:", out)                     # no usage list to drift
         lines = out.strip().splitlines()
         for line in lines:
@@ -441,11 +448,11 @@ class GateChecks(unittest.TestCase):
         self.assertFalse(_denied(_gate("csop-gate-techwrite.py",
                          w("docs/quickref.md.j2", "run $(FOO) now\n"), env)))
 
-    def test_file_hooks_reminder(self):
-        proj = _project({"file-hooks": {"default_enabled": True, "types": [
+    def test_ftypes_reminder(self):
+        proj = _project({"ftypes": {"default_enabled": True, "types": [
             {"match": ["*.sql"], "reminder": "use parameterized queries"}]}})
-        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
-        cp = _gate("csop-react-filehooks.py",
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "ftypes"], env)
+        cp = _gate("csop-react-ftypes.py",
                    {"tool_name": "Write", "tool_input": {"file_path": "q.sql",
                     "content": "select 1"}}, env)
         out = cp.stdout.decode()
@@ -453,42 +460,42 @@ class GateChecks(unittest.TestCase):
         self.assertIn("parameterized queries", out)
         self.assertIn("additionalContext", out)      # output reaches the model
 
-    def test_file_hooks_reminder_file_token(self):
-        proj = _project({"file-hooks": {"default_enabled": True, "types": [
+    def test_ftypes_reminder_file_token(self):
+        proj = _project({"ftypes": {"default_enabled": True, "types": [
             {"match": ["*.md"], "reminder": "regenerate {file} now"}]}})
-        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
-        cp = _gate("csop-react-filehooks.py",
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "ftypes"], env)
+        cp = _gate("csop-react-ftypes.py",
                    {"tool_name": "Write", "tool_input": {"file_path": "docs/a.md",
                     "content": "x"}}, env)
         self.assertIn("regenerate docs/a.md now", cp.stdout.decode())
 
-    def test_file_hooks_command_output_visible(self):
-        proj = _project({"file-hooks": {"default_enabled": True, "types": [
+    def test_ftypes_command_output_visible(self):
+        proj = _project({"ftypes": {"default_enabled": True, "types": [
             {"match": ["*.md"], "command": "echo linted {file}"}]}})
-        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
-        cp = _gate("csop-react-filehooks.py",
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "ftypes"], env)
+        cp = _gate("csop-react-ftypes.py",
                    {"tool_name": "Edit", "tool_input": {"file_path": "docs/readme.md",
                     "old_string": "a", "new_string": "b"}}, env)
         out = cp.stdout.decode()
         self.assertIn("additionalContext", out)
         self.assertIn("linted docs/readme.md", out)   # captured output plus {file} expansion
 
-    def test_file_hooks_no_match_and_inactive(self):
-        cfg = {"file-hooks": {"default_enabled": True, "types": [
+    def test_ftypes_no_match_and_inactive(self):
+        cfg = {"ftypes": {"default_enabled": True, "types": [
             {"match": ["*.sql"], "reminder": "sql only"}]}}
         proj = _project(cfg)
         ev = {"tool_name": "Write", "tool_input": {"file_path": "x.py", "content": "p"}}
-        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
-        self.assertNotIn("additionalContext", _gate("csop-react-filehooks.py", ev, env).stdout.decode())
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "ftypes"], env)
+        self.assertNotIn("additionalContext", _gate("csop-react-ftypes.py", ev, env).stdout.decode())
         env2 = _env(CLAUDE_PROJECT_DIR=proj)          # never enabled: fully inert
         sql = {"tool_name": "Write", "tool_input": {"file_path": "q.sql", "content": "s"}}
-        self.assertNotIn("additionalContext", _gate("csop-react-filehooks.py", sql, env2).stdout.decode())
+        self.assertNotIn("additionalContext", _gate("csop-react-ftypes.py", sql, env2).stdout.decode())
 
-    def test_file_hooks_malformed_entry_is_loud(self):
-        proj = _project({"file-hooks": {"default_enabled": True, "types": [
+    def test_ftypes_malformed_entry_is_loud(self):
+        proj = _project({"ftypes": {"default_enabled": True, "types": [
             {"match_globs": ["*.sql"], "reminder": "sql only"}]}})
-        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "file-hooks"], env)
-        cp = _gate("csop-react-filehooks.py",
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "ftypes"], env)
+        cp = _gate("csop-react-ftypes.py",
                    {"tool_name": "Write", "tool_input": {"file_path": "q.sql",
                     "content": "select 1"}}, env)
         out = cp.stdout.decode()
@@ -1174,6 +1181,112 @@ class InstallChecks(unittest.TestCase):
             if m:
                 self.assertTrue(os.path.isfile(os.path.join(client, m.group(1))),
                                 "dead hook path via symlinked client: " + c)
+
+
+class SyncCommandsChecks(unittest.TestCase):
+    """Pruning deletes files in a consumer's repo, so each guard gets a test."""
+
+    def _dirs(self):
+        src = tempfile.mkdtemp()
+        dest = os.path.join(tempfile.mkdtemp(), ".claude", "commands")
+        os.makedirs(dest)
+        _write(os.path.join(src, "sop.md"), _CMD % "")
+        return src, dest
+
+    def test_writes_commands_with_plugin_root_rewritten(self):
+        src, dest = self._dirs()
+        sync_commands.sync(src, dest, "tools/csop")
+        with open(os.path.join(dest, "sop.md")) as f:
+            body = f.read()
+        self.assertIn("${CLAUDE_PROJECT_DIR}/tools/csop/hooks/csop.py", body)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", body)
+
+    def test_self_host_rel_has_no_dot_segment(self):
+        src, dest = self._dirs()
+        sync_commands.sync(src, dest, ".")
+        with open(os.path.join(dest, "sop.md")) as f:
+            self.assertIn("${CLAUDE_PROJECT_DIR}/hooks/csop.py", f.read())
+
+    def test_prunes_a_retired_csop_command(self):
+        src, dest = self._dirs()
+        retired = os.path.join(dest, "disc.md")
+        _write(retired, _CMD % "")
+        log, (_, pruned, skipped) = sync_commands.sync(src, dest, "x")
+        self.assertFalse(os.path.exists(retired))
+        self.assertEqual((pruned, skipped), (1, 0))
+        self.assertTrue(any("pruned" in ln and "disc.md" in ln for ln in log))
+
+    def test_keeps_a_command_that_is_not_ours(self):
+        src, dest = self._dirs()
+        theirs = os.path.join(dest, "deploy.md")
+        _write(theirs, "---\ndescription: ours\n---\n!`make deploy`\n")
+        log, (_, pruned, skipped) = sync_commands.sync(src, dest, "x")
+        self.assertTrue(os.path.exists(theirs))
+        self.assertEqual((pruned, skipped), (0, 1))
+        self.assertTrue(any("kept" in ln and "deploy.md" in ln for ln in log))
+
+    def test_keeps_a_command_merely_mentioning_csop(self):
+        src, dest = self._dirs()
+        near = os.path.join(dest, "notes.md")
+        _write(near, "---\ndescription: how our hooks/csop.py works\n---\n!`ls`\n")
+        sync_commands.sync(src, dest, "x")
+        self.assertTrue(os.path.exists(near))
+
+    def test_keeps_a_symlink_and_a_non_markdown_file(self):
+        src, dest = self._dirs()
+        target = os.path.join(tempfile.mkdtemp(), "real.md")
+        _write(target, _CMD % "")
+        link = os.path.join(dest, "linked.md")
+        os.symlink(target, link)
+        other = os.path.join(dest, "README.txt")
+        _write(other, "not a command")
+        sync_commands.sync(src, dest, "x")
+        self.assertTrue(os.path.islink(link))
+        self.assertTrue(os.path.isfile(target))
+        self.assertTrue(os.path.isfile(other))
+
+    def test_dry_run_changes_nothing(self):
+        src, dest = self._dirs()
+        retired = os.path.join(dest, "disc.md")
+        _write(retired, _CMD % "")
+        log, (_, pruned, _s) = sync_commands.sync(src, dest, "x", dry_run=True)
+        self.assertTrue(os.path.exists(retired))
+        self.assertFalse(os.path.exists(os.path.join(dest, "sop.md")))
+        self.assertEqual(pruned, 1)
+        self.assertTrue(any("would prune" in ln for ln in log))
+
+    def test_refuses_a_destination_outside_a_claude_commands_dir(self):
+        src, _d = self._dirs()
+        victim = tempfile.mkdtemp()
+        _write(os.path.join(victim, "keep.md"), "important")
+        with self.assertRaises(ValueError):
+            sync_commands.sync(src, victim, "x")
+        self.assertTrue(os.path.isfile(os.path.join(victim, "keep.md")))
+
+    def test_refuses_an_empty_source_so_a_bad_path_cannot_prune_everything(self):
+        _s, dest = self._dirs()
+        existing = os.path.join(dest, "sop.md")
+        _write(existing, _CMD % "")
+        with self.assertRaises(ValueError):
+            sync_commands.sync(tempfile.mkdtemp(), dest, "x")
+        self.assertTrue(os.path.isfile(existing))
+
+    def test_install_prunes_a_retired_command_in_a_client(self):
+        client = tempfile.mkdtemp()
+        cmds = os.path.join(client, ".claude", "commands")
+        os.makedirs(cmds)
+        retired = os.path.join(cmds, "discipline.md")
+        _write(retired, _CMD % "")
+        theirs = os.path.join(cmds, "deploy.md")
+        _write(theirs, "---\ndescription: theirs\n---\n!`make deploy`\n")
+        r = subprocess.run(["make", "install", "DEST=" + client, "NO_COLOR=1",
+                            "SKIP_VERSION_CHECK=1"], cwd=ROOT, capture_output=True)
+        out = r.stdout.decode() + r.stderr.decode()
+        self.assertFalse(os.path.exists(retired), out)
+        self.assertTrue(os.path.isfile(theirs), out)
+        self.assertTrue(os.path.isfile(os.path.join(cmds, "sop.md")), out)
+        self.assertIn("discipline.md", out)   # the removal is logged for the human
+        self.assertIn("deploy.md", out)       # so is the file left alone
 
 
 if __name__ == "__main__":

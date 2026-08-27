@@ -78,7 +78,7 @@
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-react-filehooks.py\"" },
+          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-react-ftypes.py\"" },
           { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-report-mem.py\"" },
           { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-promotion.py\"" }
         ]
