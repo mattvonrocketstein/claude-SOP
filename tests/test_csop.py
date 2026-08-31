@@ -292,6 +292,28 @@ class GateChecks(unittest.TestCase):
         self.assertTrue(_denied(_gate("csop-gate-git.py",
                         _bash("git -C scratch/iso/mk push"), env)))
 
+    def test_hacc_reads_survive_unrelated_clauses(self):
+        env = _env(); _cli(["enable", "hacc"], env)
+        for cmd in ("git log --oneline && make " + "clean",
+                    "git status && " + "rm -f scratch/tmp",
+                    "git worktree add scratch/iso/mk HEAD && ls"):
+            self.assertFalse(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+
+    def test_hacc_exemption_is_per_invocation(self):
+        env = _env(); _cli(["enable", "hacc"], env); _cli(["enable", "iso"], env)
+        # an iso-scoped read must not clear a core write beside it
+        cmd = "git -C scratch/iso/mk log && git " + "reset --hard"
+        self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)))
+        self.assertTrue(_denied(_gate("csop-gate-git.py", _bash("git $CMD"), env)))
+
+    def test_hacc_worktree_reads_only(self):
+        env = _env(); _cli(["enable", "hacc"], env)
+        for cmd in ("git worktree list", "git worktree add scratch/iso/mk HEAD"):
+            self.assertFalse(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+        for cmd in ("git worktree " + "remove scratch/iso/mk",
+                    "git worktree " + "prune"):
+            self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+
     def test_dream_write_confinement(self):
         env = _env(); _cli(["enable", "dream"], env)
         self.assertTrue(_denied(_gate("csop-gate-dreamwrite.py",
@@ -1270,6 +1292,23 @@ class SyncCommandsChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             sync_commands.sync(tempfile.mkdtemp(), dest, "x")
         self.assertTrue(os.path.isfile(existing))
+
+    def test_sibling_update_rewires_each_client(self):
+        """A pull alone leaves a client's settings.json pointing at the previous
+        release's hooks, so the bulk updater has to re-run install per project."""
+        with open(os.path.join(ROOT, "Makefile")) as f:
+            recipe = f.read().split("update.siblings:")[1].split("\nclean:")[0]
+        self.assertIn("install", recipe)
+        self.assertIn("git -C", recipe)
+
+    def test_sibling_update_resets_rather_than_pulls(self):
+        """A vendored checkout is a pinned mirror, and upstream squashes, so the
+        sweep has to survive a rewritten history that no pull can reconcile."""
+        with open(os.path.join(ROOT, "Makefile")) as f:
+            recipe = f.read().split("update.siblings:")[1].split("\nclean:")[0]
+        self.assertIn("reset --hard", recipe)
+        self.assertNotIn("git -C \"$$d\" pull", recipe)
+        self.assertIn("status --porcelain", recipe)   # local edits stop the reset
 
     def test_install_prunes_a_retired_command_in_a_client(self):
         client = tempfile.mkdtemp()

@@ -222,13 +222,13 @@ Git is read-only for the agent, so a human runs core git.
 
 **Enforced restrictions**
 
-- **Write subcommands denied.** A git subcommand in `deny_list` (commit, checkout, reset, rebase, merge, push, rm, and the like) is blocked at the permission layer. Read-only git (`status`/`log`/`diff`/`show`) and `git add` pass.
-- **Iso-tree carve-out.** When `iso` is active, history ops confined to a tree (`git -C scratch/iso/<name> rebase`/`commit`) are allowed; ops that escape it (`push`/`pull`, `gc`/`prune`/`filter-*`) stay denied. Promotion into core is by edits, never a merge or commit.
+- **Only read subcommands pass.** Each git call in a command is classified by its own subcommand. One on `read_list` (`status`/`log`/`diff`/`show`, plus `add` and `worktree`) passes; every other subcommand is blocked at the permission layer, as is a call the gate cannot classify (`git $CMD`). Because each call is judged alone, a deny word in an unrelated clause cannot block a read: `git log && make clean` passes.
+- **Iso-tree carve-out.** When `iso` is active, a call directed into a tree with `git -C scratch/iso/<name>` is allowed (`rebase`/`commit`); ops that escape it (`push`/`pull`, `gc`/`prune`/`filter-*`) stay denied. The carve-out applies per call, so an iso-scoped read does not clear a core write beside it. Promotion into core is by edits, never a merge or commit.
 - **Escape hatch:** export `CSOP_HACC=off`.
 
 **Config** (`.claude/csop.json`, project-overridable)
 
-- `deny_list`: the git subcommands the agent may not run.
+- `read_list`: the only git subcommands the agent may run.
 - `default_enabled`: on by default; set false to opt this project out.
 
 ### Robot Accountability

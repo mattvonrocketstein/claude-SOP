@@ -10,8 +10,8 @@
 
   "hacc": {
     "default_enabled": true,         // set false to opt this project out
-    // git subcommands the agent may not run (a human runs them); reads + `git add` pass:
-    "deny_list": ["commit", "stash", "checkout", "switch", "reset", "rebase", "merge", "push", "pull", "revert", "restore", "clean", "cherry-pick", "am", "rm", "mv", "apply", "gc", "prune", "filter-branch", "filter-repo"],
+    // the only git subcommands the agent may run; everything else a human runs:
+    "read_list": ["log", "status", "diff", "show", "blame", "describe", "shortlog", "rev-parse", "rev-list", "ls-files", "ls-tree", "ls-remote", "cat-file", "for-each-ref", "check-ignore", "grep", "add", "worktree add", "worktree list"],
   },
 
   "scratch": {

@@ -2,9 +2,10 @@
 """modeline -- the user modeline (end-of-turn CSOP status footer).
 
 A plugin cannot drive the built-in status line, so this Stop hook emits a footer
-through the `systemMessage` field, one component per line. Components, format,
-and color handling are in docs/gate-internals.md. Never blocks, and stays silent
-when every component is empty.
+through the `systemMessage` field, one component per line. Follow-up reminders
+address the agent and print first; the boxed modeline is the user's and reads
+last, with a drawn rule between them. Components, format, and color handling are
+in scratch/gate-internals.md. Never blocks, silent when every component is empty.
 """
 import json
 import os
@@ -19,6 +20,7 @@ GLYPH = "⬥"
 BRAND = "CSOP"
 INNER = 54                    # content columns before the host wraps for us
 TOP, RAIL, FOOT = "\u250f", "\u2503", "\u2517"   # one box family: mixing families mixes metrics
+RULE = "-" * INNER            # a drawn divider, since Stop trims a blank one
 _ANSI = re.compile("\033\\[[0-9;]*m")
 
 
@@ -109,19 +111,16 @@ COMPONENTS = [_disciplines]
 TAIL = [_stages]
 
 
-def render(extra=()):
+def render():
     """Assemble the footer: a one-glyph gutter column, corner to rail to corner.
     Every glyph comes from the heavy box family, which fonts ship complete or
     not at all, so the column cannot bend the way a mixed set does. There is no
     horizontal border, since no character that could draw one holds its width.
     Wrapping happens here rather than in the host, which wraps at a fixed column
-    mid-word. `extra` appends rows."""
+    mid-word. The box holds standing status only; follow-ups print beneath it."""
     body = []
     for component in COMPONENTS:
         body += component()
-    for x in extra:
-        if x:
-            body += _balance(x.split(), INNER)
     for component in TAIL:
         body += component()
     if not body:
@@ -144,13 +143,28 @@ def _reminders():
     return out
 
 
+def _followups(extra):
+    """Reminders and notices, wrapped and printed above the box. These address
+    the agent, so they come first and stay outside the rails; the modeline below
+    them is the user's, and reads last."""
+    rows = []
+    for x in extra:
+        if not x:
+            continue
+        wrapped = _balance(x.split(), INNER)
+        rows += [GLYPH + " " + wrapped[0]] + ["  " + r for r in wrapped[1:]]
+    return "\n".join(rows)
+
+
 def main():
     event = csop.load_event()
     if event.get("stop_hook_active"):
         sys.exit(0)                     # re-entrancy guard: never join a block loop
     extra = list(_reminders())
     extra += ["{0} CSOP: {1}".format(_c("33", "⚠"), n) for n in csop.drain_notices()]
-    line = render(extra)
+    agent, user = _followups(extra), render()
+    line = "\n".join(x for x in [agent, _c("2", RULE) if agent and user else "",
+                                 user] if x)
     if line:
         print(json.dumps({"systemMessage": line}))
     sys.exit(0)                          # always allow the turn to end

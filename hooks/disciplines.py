@@ -72,7 +72,7 @@ class Discipline:
         """`get(key)`, then str.format it JIT against the effective config: this
         discipline's own params at top level, plus every discipline as a sibling
         handle keyed by codename, so a reminder can reference another discipline
-        directly, e.g. `{hacc.deny_list}` or `{scratch.home}`. A list value (e.g. an
+        directly, e.g. `{hacc.read_list}` or `{scratch.home}`. A list value (e.g. an
         array of nudges) is rendered element-wise. Fail-open: an unknown/broken
         placeholder leaves the text literal so a config typo can never brick a hook."""
         text = cls.get(key)
@@ -122,19 +122,20 @@ class HumanAccountability(Discipline):
     codename = "hacc"
     name = "Human Accountability"
     default_enabled = True
-    deny_list = ["commit", "stash", "checkout", "switch", "reset", "rebase",
-                 "merge", "push", "pull", "revert", "restore", "clean",
-                 "cherry-pick", "am", "rm", "mv", "apply", "gc", "prune",
-                 "filter-branch", "filter-repo"]
+    read_list = ["log", "status", "diff", "show", "blame", "describe",
+                 "shortlog", "rev-parse", "rev-list", "ls-files", "ls-tree",
+                 "ls-remote", "cat-file", "for-each-ref", "check-ignore",
+                 "grep", "add", "worktree add", "worktree list"]
     nudge = ("Human Accountability active: git is read-only for you -- don't "
                 "commit/stash/checkout/push/reset/rm/etc; ask the human to run "
                 "git writes. exception when iso is active: git history ops "
                 "confined to an iso tree are allowed (`git -C {iso.home}<name> "
                 "rebase <core>` for freshness). never merge/commit into core -- "
                 "promote a tree by edits/inserts. Git reads and `git add` are fine.")
-    overridable = ("default_enabled", "deny_list", "nudge")
-    description = ("Git is read-only for the agent: the git subcommands in "
-                  "`deny_list` are denied. Git reads and `git add` (staging) "
+    overridable = ("default_enabled", "read_list", "nudge")
+    description = ("Git is read-only for the agent: only the git subcommands in "
+                  "`read_list` pass, everything else is denied. Git reads and "
+                  "`git add` (staging) "
                   "pass through. A human must run git writes directly (or lift "
                   "via CSOP_HACC=off); the agent cannot alter history / branches "
                   "/ working-tree / remote. When `iso` is active, git history ops "

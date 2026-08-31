@@ -36,6 +36,8 @@ endif
 # Where `update.siblings` looks for consumer projects; override on the CLI.
 SIBLING_ROOT ?= $(HOME)/code
 
+# A vendored checkout is a pinned mirror, so it is reset onto upstream, not pulled.
+
 help: ## Show available targets
 	@echo "$(BOLD)CSOP make targets$(RESET)"
 	@grep -E '^[a-zA-Z_.-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -95,7 +97,7 @@ validate: ## Static sanity: hooks parse + configs valid (json / jsonc)
 
 ci: validate check ## Run the full offline CI gate (validate + check)
 
-update.siblings: ## Fetch+pull every .claude/csop submodule under ~/code (SIBLING_ROOT)
+update.siblings: version-check ## Reset every .claude/csop submodule under ~/code (SIBLING_ROOT) to upstream, then re-wire it
 	@root="$(SIBLING_ROOT)"; \
 	 [ -d "$$root" ] || { echo "$(RED)error:$(RESET) $$root is not a directory (override with SIBLING_ROOT=<path>)"; exit 1; }; \
 	 echo "$(BOLD)scanning$(RESET) $$root for .claude/csop submodules"; \
@@ -105,13 +107,23 @@ update.siblings: ## Fetch+pull every .claude/csop submodule under ~/code (SIBLIN
 	   super="$$(git -C "$$d" rev-parse --show-superproject-working-tree 2>/dev/null)"; \
 	   [ -n "$$super" ] || { echo "  $(DIM)skip$(RESET)  $$d (not a submodule)"; continue; }; \
 	   found=$$((found+1)); \
-	   if out="$$(git -C "$$d" fetch 2>&1 && git -C "$$d" pull 2>&1)"; then \
+	   ins=""; \
+	   if [ -n "$$(git -C "$$d" status --porcelain --untracked-files=no 2>/dev/null)" ]; then \
+	     fail=$$((fail+1)); \
+	     echo "  $(RED)fail$(RESET)  $$d $(DIM)(tracked local edits; commit or discard them, then re-run)$(RESET)"; \
+	     continue; \
+	   fi; \
+	   up="$$(git -C "$$d" rev-parse --abbrev-ref '@{u}' 2>/dev/null)"; \
+	   [ -n "$$up" ] || up="origin/$$(git -C "$$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"; \
+	   if out="$$(git -C "$$d" fetch --prune 2>&1 && git -C "$$d" reset --hard "$$up" 2>&1)" \
+	      && ins="$$($(MAKE) -s -C "$$d" install NO_COLOR=1 SKIP_VERSION_CHECK=1 2>&1)"; then \
 	     ok=$$((ok+1)); \
 	     echo "  $(GREEN)ok$(RESET)    $$d"; \
+	     printf '%s\n' "$$ins" | sed 's/^/        /'; \
 	   else \
 	     fail=$$((fail+1)); \
 	     echo "  $(RED)fail$(RESET)  $$d"; \
-	     printf '%s\n' "$$out" | sed 's/^/        /'; \
+	     printf '%s\n%s\n' "$$out" "$$ins" | sed 's/^/        /'; \
 	   fi; \
 	 done < <(find "$$root" -type d -name .claude -not -path '*/.git/*' -exec test -d '{}/csop' \; -print 2>/dev/null | sed 's#$$#/csop#' | sort); \
 	 echo "$(BOLD)done$(RESET) $$found submodule(s): $(GREEN)$$ok ok$(RESET), $(RED)$$fail failed$(RESET)"; \
