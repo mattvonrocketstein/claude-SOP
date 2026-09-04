@@ -403,24 +403,6 @@ class TacticalRetreat(Discipline):
                    "repeated failed retries).")
 
 
-class Dreamer(Discipline):
-    codename = "dream"
-    name = "Dreamer"
-    default_enabled = False
-    home = Scratch.home               # writes are confined here while active
-    action = "deny"
-    nudge = ("Dreamer active: diverge, don't converge -- brainstorm freely, "
-                "generate many options, defer judgment. Capture ideas as notes in "
-                "`{home}`; structured writes outside `{home}` are denied -- think "
-                "big / blue-sky, don't build yet.")
-    overridable = ("default_enabled", "home", "action", "nudge")
-    description = ("Ideation / divergent-thinking mode: generate options freely, "
-                   "defer judgment and implementation, don't prematurely converge "
-                   "or start building. Enforced: structured writes are confined to "
-                   "`dir` (default the scratch area); writes elsewhere are denied. "
-                   "The 'diverge' counterpart to the execution disciplines.")
-
-
 class Scientist(Discipline):
     codename = "science"
     name = "Scientist"
@@ -620,7 +602,7 @@ class MemoryAccountability(Discipline):
     paths = ["MEMORY.md", "CLAUDE.md", ".claude/CLAUDE.md",
              "**/memory/**", "~/.claude/CLAUDE.md"]
     allow_retraction = True           # removing a memory is the remedy, not the risk
-    excerpt_chars = 120               # cap on quoted memory text in a prompt or footer
+    excerpt_chars = 200               # cap on quoted memory text in a prompt or footer
     overridable = ("default_enabled", "mode", "paths", "allow_retraction",
                    "excerpt_chars", "nudge", "reminder")
     append = ("nudge", "reminder", "paths")
@@ -696,7 +678,7 @@ class Filetypes(Discipline):
 
 DISCIPLINES = [IsoTree, HumanAccountability, RobotAccountability, Scratch,
                Promotion, GenerativeHygiene, FrozenFeatures, TestDrivenDevelopment,
-               FeatureSpike, Performance, TacticalRetreat, Dreamer, Scientist,
+               FeatureSpike, Performance, TacticalRetreat, Scientist,
                Stepwise, Consensus, Groomer, Toolsmith, TechnicalWriter,
                EntrypointsSandbox, Filetypes, Idiomatic,
                MemoryAccountability]

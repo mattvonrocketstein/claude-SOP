@@ -2,10 +2,10 @@
 """modeline -- the user modeline (end-of-turn CSOP status footer).
 
 A plugin cannot drive the built-in status line, so this Stop hook emits a footer
-through the `systemMessage` field, one component per line. Follow-up reminders
-address the agent and print first; the boxed modeline is the user's and reads
-last, with a drawn rule between them. Components, format, and color handling are
-in scratch/gate-internals.md. Never blocks, silent when every component is empty.
+through `systemMessage`, the human's channel: the boxed modeline and one-time
+notices. Reminders are the agent's and leave as Stop `additionalContext`, which
+hands the turn back so they can be acted on; the box prints once, on the return
+pass. Details in scratch/gate-internals.md. Never blocks, silent when idle.
 """
 import json
 import os
@@ -133,22 +133,22 @@ def render():
 
 
 def _reminders():
-    """Each active discipline's post-turn `reminder` (follow-up tasks), rendered."""
+    """Each active discipline's post-turn `reminder` (follow-up tasks), as plain
+    text: this one goes to the model, where styling is only noise."""
     out, act = [], csop.effective_active()
     for d in disciplines.DISCIPLINES:
         if d.codename in act and not csop.escaped(d.codename):
             r = d.render("reminder")
             if r:
-                out.append("{0}: {1}".format(_c("36", d.name), r))
+                out.append("{0}: {1}".format(d.name, r))
     return out
 
 
-def _followups(extra):
-    """Reminders and notices, wrapped and printed above the box. These address
-    the agent, so they come first and stay outside the rails; the modeline below
-    them is the user's, and reads last."""
+def _notices(items):
+    """One-time notices, wrapped and printed above the box. They are the user's,
+    like the modeline, but stay outside the rails since they come and go."""
     rows = []
-    for x in extra:
+    for x in items:
         if not x:
             continue
         wrapped = _balance(x.split(), INNER)
@@ -158,13 +158,18 @@ def _followups(extra):
 
 def main():
     event = csop.load_event()
-    if event.get("stop_hook_active"):
-        sys.exit(0)                     # re-entrancy guard: never join a block loop
-    extra = list(_reminders())
-    extra += ["{0} CSOP: {1}".format(_c("33", "⚠"), n) for n in csop.drain_notices()]
-    agent, user = _followups(extra), render()
-    line = "\n".join(x for x in [agent, _c("2", RULE) if agent and user else "",
-                                 user] if x)
+    if not event.get("stop_hook_active"):
+        pending = _reminders()
+        if pending:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": "\n".join(pending)}}))
+            sys.exit(0)      # the box waits for the pass that follows the handback
+    notes = _notices(["{0} CSOP: {1}".format(_c("33", "⚠"), n)
+                      for n in csop.drain_notices()])
+    box = render()
+    line = "\n".join(x for x in [notes, _c("2", RULE) if notes and box else "",
+                                 box] if x)
     if line:
         print(json.dumps({"systemMessage": line}))
     sys.exit(0)                          # always allow the turn to end

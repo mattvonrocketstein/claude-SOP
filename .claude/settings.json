@@ -68,7 +68,6 @@
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-selfprotect.py\"" },
-          { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-dreamwrite.py\"" },
           { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-mem.py\"" },
           { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/hooks/csop-gate-promotion.py\"" }
         ]

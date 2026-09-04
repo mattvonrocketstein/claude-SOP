@@ -14,7 +14,8 @@ A **discipline** is a process-level protocol (a components of a SOP) which is en
 
 - `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`).
 - `list`: show active disciplines (also the no-arg default).
-- `catalog`: list all known disciplines.
+- `catalog`: every discipline, one line each, with a `*` on the active ones.
+- `show <name|codename>`: one discipline in full (defaults, requires, config keys).
 - Disarm all: `/clear`.
 
 ## Two halves of a discipline

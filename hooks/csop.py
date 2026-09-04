@@ -638,6 +638,30 @@ def enforce(action, reason):
 
 # ---- CLI: `csop.py enable <name|codename> | list | catalog` -----------------
 
+_WIDTH = 80                             # a terminal the reader can count on
+
+
+def _clip(text, width):
+    """The lead sentence of `text`, cut to `width` on a word boundary."""
+    head = text.split(". ")[0].rstrip(".")
+    if len(head) <= width:
+        return head
+    return head[:width - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _wrap(text, width):
+    """Greedy word wrap, since textwrap would re-flow the single-space idiom."""
+    rows, cur = [], ""
+    for word in text.split():
+        cand = (cur + " " + word) if cur else word
+        if cur and len(cand) > width:
+            rows.append(cur)
+            cur = word
+        else:
+            cur = cand
+    return rows + [cur] if cur else rows
+
+
 def _new_nudges(before):
     """Nudge lines for disciplines that became active since the `before` snapshot
     of effective_active(). On a stage change this is what the new stage freshly
@@ -661,7 +685,8 @@ _USAGE = """csop.py <command>
   enable <name|codename>   activate a discipline for this session
   disable <name|all>       deactivate one, or every active discipline
   list                     the active disciplines (the no-argument default)
-  catalog                  every discipline, with codename and description
+  catalog                  every discipline, one line each
+  show <name|codename>     one discipline in full
   stage [<name>]           show the current stage, or make <name> current
   promote [<name>]         move to a successor stage along the `from` graph
   demote [<name>]          move back to a source stage
@@ -706,6 +731,9 @@ def _cli(argv):
     import disciplines
     if argv[:1] == ["enable"] and len(argv) >= 2 and not argv[1].startswith("-"):
         rid = disciplines.resolve(argv[1])
+        if not disciplines.by_codename(rid):
+            print("unknown discipline: " + argv[1], file=sys.stderr)
+            return 2                    # never latch a name no discipline answers to
         target = disciplines.closure({rid})
         direct, cascade = enable_drops(argv[1])
         removed = direct | cascade
@@ -819,9 +847,34 @@ def _cli(argv):
         print("active: " + " ".join(sorted(active())))
         return 0
     if argv[:1] == ["catalog"]:
+        cw = max(len(d.codename) for d in disciplines.DISCIPLINES)
+        nw = max(len(d.name) for d in disciplines.DISCIPLINES)
+        act = effective_active()
         for d in disciplines.DISCIPLINES:
-            req = " [requires: {0}]".format(" ".join(d.requires)) if d.requires else ""
-            print("{0}  ({1}){2}  {3}".format(d.name, d.codename, req, d.description))
+            print("{0} {1}  {2}  {3}".format(
+                "*" if d.codename in act else " ",
+                d.codename.ljust(cw), d.name.ljust(nw),
+                _clip(d.description, _WIDTH - cw - nw - 6)))
+        print("\n* is active now. `csop.py show <name>` for one in full.")
+        return 0
+    if argv[:1] == ["show"] and len(argv) >= 2:
+        d = disciplines.by_codename(disciplines.resolve(argv[1]))
+        if not d:
+            print("unknown discipline: " + argv[1], file=sys.stderr)
+            return 2
+        print("{0} ({1}){2}".format(
+            d.name, d.codename,
+            "  [active]" if d.codename in effective_active() else ""))
+        for label, val in (("default", "on" if d.get("default_enabled") else "off"),
+                           ("requires", " ".join(d.requires)),
+                           ("conflicts", " ".join(d.conflicts)),
+                           ("config", " ".join(k for k in d.overridable
+                                               if k != "default_enabled"))):
+            if val:
+                print("  {0}: {1}".format(label, val))
+        print("")
+        for line in _wrap(d.description, _WIDTH - 2):
+            print("  " + line)
         return 0
     if argv[:1] in (["help"], ["-h"], ["--help"]):
         print(_USAGE)

@@ -188,8 +188,42 @@ class ShellChecks(unittest.TestCase):
 
 
 class CliChecks(unittest.TestCase):
-    def test_catalog(self):
-        self.assertEqual(_cli(["catalog"], _env()).returncode, 0)
+    def test_catalog_is_an_index_and_show_is_the_full_entry(self):
+        env = _env(); _cli(["enable", "iso"], env)
+        cat = _cli(["catalog"], env)
+        self.assertEqual(cat.returncode, 0)
+        rows = [ln for ln in cat.stdout.decode().splitlines() if "  " in ln]
+        for row in rows:
+            self.assertLessEqual(len(row), 80)         # one screen, no wrapping
+        self.assertTrue(any(ln.startswith("* iso") for ln in rows))   # active, starred
+        self.assertTrue(any(ln.startswith("  tdd") for ln in rows))   # inactive, plain
+        full = _cli(["show", "Memory Accountability"], env).stdout.decode()
+        self.assertIn("requires: racc", full)
+        self.assertIn("allow_retraction", full)        # the config keys are listed
+        flat = " ".join(full.split())                  # wrapped, so match unwrapped
+        self.assertIn("a memory can still form but never in silence", flat)
+        self.assertEqual(_cli(["show", "nope"], env).returncode, 2)
+
+    def test_read_only_slash_commands_answer_without_the_model(self):
+        env = _env(); _cli(["enable", "iso"], env)
+        tag = ("<command-message>sop</command-message>\n"
+               "<command-name>/sop</command-name>\n"
+               "<command-args>{0}</command-args>")
+        def ask(args):
+            cp = _gate("csop-command.py", {"hook_event_name": "UserPromptSubmit",
+                                           "prompt": tag.format(args)}, env)
+            return cp.stdout.decode()
+        cat = json.loads(ask("catalog"))
+        self.assertEqual(cat["decision"], "block")       # blocked, so nothing is queried
+        self.assertTrue(cat["suppressOriginalPrompt"])   # and no prompt echo trails it
+        self.assertIn("* iso", cat["reason"])
+        self.assertIn("Human Accountability", json.loads(ask("show hacc"))["reason"])
+        self.assertIn("active:", json.loads(ask(""))["reason"])   # no verb means list
+        self.assertEqual(ask("enable iso"), "")          # mutating: keeps its prompt
+        self.assertEqual(ask("stage core"), "")
+        plain = _gate("csop-command.py", {"hook_event_name": "UserPromptSubmit",
+                                          "prompt": "please read /sop and report"}, env)
+        self.assertEqual(plain.stdout.decode(), "")      # prose is never a command
 
     def test_enable(self):
         self.assertIn("iso", _cli(["enable", "iso"], _env()).stdout.decode())
@@ -248,6 +282,19 @@ class CliChecks(unittest.TestCase):
         self.assertEqual(out.strip().splitlines()[-1][2:],
                          "Active Stage :: core")       # and it closes the footer
         self.assertNotIn("(none current)", out)
+
+    def test_modeline_sends_reminders_to_the_agent_and_the_box_to_the_human(self):
+        env = _env(NO_COLOR="1"); _cli(["enable", "iso"], env)
+        stop = {"hook_event_name": "Stop"}
+        first = json.loads(_gate("csop-modeline.py", stop, env).stdout.decode())
+        self.assertIn("IsolatedTree follow-up",
+                      first["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("systemMessage", first)       # the human's channel stays clean
+        stop["stop_hook_active"] = True
+        back = json.loads(_gate("csop-modeline.py", stop, env).stdout.decode())
+        self.assertIn("Active Disciplines", back["systemMessage"])
+        self.assertNotIn("follow-up", back["systemMessage"])
+        self.assertNotIn("hookSpecificOutput", back)   # one handback, never a loop
 
     def test_requires_closure(self):
         self.assertIn("hyg", _cli(["enable", "techwrite"], _env()).stdout.decode())
@@ -314,12 +361,13 @@ class GateChecks(unittest.TestCase):
                     "git worktree " + "prune"):
             self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
 
-    def test_dream_write_confinement(self):
-        env = _env(); _cli(["enable", "dream"], env)
-        self.assertTrue(_denied(_gate("csop-gate-dreamwrite.py",
-                        _edit(path="src/x.py"), env)))
-        self.assertFalse(_denied(_gate("csop-gate-dreamwrite.py",
-                         _edit(path="scratch/x.py"), env)))
+    def test_orphan_config_key_is_inert(self):
+        proj = _project({"dream": {"default_enabled": True, "home": "x/"},
+                         "hacc": {"default_enabled": True}})
+        env = _env(CLAUDE_PROJECT_DIR=proj)
+        self.assertEqual(_cli(["list"], env).returncode, 0)
+        self.assertEqual(_cli(["catalog"], env).returncode, 0)
+        self.assertNotEqual(_cli(["enable", "dream"], env).returncode, 0)
 
     def test_freeze_region(self):
         proj = _project(

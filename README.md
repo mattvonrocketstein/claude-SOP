@@ -115,6 +115,8 @@ This merges CSOP's hooks and the `/sop` permission entries into the project's `.
 
 The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
 
+`/sop catalog` lists every discipline one line to a row, with a `*` on the active ones, and `/sop show <name>` prints one in full. Both answer instantly and exactly: [`csop-command.py`](hooks/csop-command.py), a `UserPromptSubmit` hook, runs the read-only verbs itself and blocks the prompt, so the harness never queries the model. Fixed text does not need a model to retype it, and a model asked to retype it may paraphrase instead. The mutating verbs keep the model path on purpose, since that is where the permission prompt lives.
+
 Disabling is human-only. The agent can arm a discipline but never disarm one: an always-on rail, [`csop-gate-disarm.py`](hooks/csop-gate-disarm.py), blocks every route from a tool call to a smaller active set, including edits to csop's own state. A slash command reaches `disable` because its body runs a fixed command shape that the rail escalates to a permission prompt, and only a human can clear a prompt. Approve one only when you just typed the command yourself.
 
 
@@ -286,7 +288,7 @@ redirect would write a memory unobserved.
 - `mode`: `approval` (default), `amnesiac`, or `visible`.
 - `paths`: the governed memory paths; project entries append to the defaults.
 - `allow_retraction`: let removal-only edits through (default true).
-- `excerpt_chars`: cap on quoted memory text in a prompt or modeline notice (default 120).
+- `excerpt_chars`: cap on quoted memory text in a prompt or modeline notice (default 200).
 - `default_enabled`: off by default.
 
 ### Generative Hygiene
@@ -393,23 +395,26 @@ preamble.
 ```
 ┏ CSOP :: Use /sop help for details.
 ┃ Active Disciplines: hacc, hyg, racc, scratch
-┃ IsolatedTree: ...follow-up reminder...
 ┗ Active Stage :: core
 ```
 
 `Active Disciplines` lists only what is on. `Active Stage` (shown when `pro` is
 active and the project defines stages) names the current stage, or
-`(none current)`. Between them come each active discipline's post-turn reminder
-and any one-time notice. Rows wrap at a fixed inner width here rather than in the
-host, which wraps mid-word. Markers, not styling, carry the meaning: the desktop
-app renders neither ANSI nor markdown, so anything style-only is invisible there.
+`(none current)`. Any one-time notice prints above the box, under a `⬥`. Rows
+wrap at a fixed inner width here rather than in the host, which wraps mid-word.
+Markers, not styling, carry the meaning: the desktop app renders neither ANSI nor
+markdown, so anything style-only is invisible there.
 
-Silent when every component is empty. It never blocks (exits 0, guards on
-`stop_hook_active`), so it cannot cause a continuation loop.
+Silent when every component is empty. It never blocks (exits 0), so it cannot
+cause a continuation loop.
 
-**Display channel.** Raw `Stop`-hook stdout is not shown to the user; the
-modeline emits the documented user-visible `systemMessage` JSON field, which
-Claude Code renders as an end-of-turn notice.
+**Two channels.** Raw `Stop`-hook stdout is not shown to the user, so the box and
+its notices go out as the documented `systemMessage` JSON field, which Claude Code
+renders as an end-of-turn notice. Post-turn reminders are addressed to the agent,
+not the human, so they go out as `additionalContext` on the same hook instead.
+That hands the turn back to the model so a reminder can be acted on rather than
+merely displayed. The box prints on the return pass, which carries
+`stop_hook_active`, so it appears once per turn and the handback happens once.
 
 ### Status line (opt-in, CLI only)
 

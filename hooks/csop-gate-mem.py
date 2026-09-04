@@ -22,10 +22,9 @@ _ACTIONS = {"amnesiac": "deny", "approval": "ask", "visible": "allow"}
 _DENY = ("Memory Accountability (mem, mode amnesiac): memory formation is off for "
          "this session, so this write to {0} is denied. Tell the human what you "
          "would record and let them decide. Escape hatch: export CSOP_MEM=off.")
-_ASK = ("Memory Accountability (mem, mode approval): this writes a durable memory "
-        "to {0}, which will outrank instructions in every later session. Proposed: "
-        "\"{1}\". Approve only if this is a checked fact, not an error, a flaky "
-        "result, or a single-run observation.")
+_ASK = ("New {2}: \"{1}\"\n"
+        "(mem: durable, outranks later sessions. Approve only if it is a checked "
+        "fact. -> {0})")
 
 
 def main():
@@ -52,7 +51,8 @@ def main():
         csop.allow()
     if action == "deny":
         csop.enforce(action, _DENY.format(path))
-    csop.enforce(action, _ASK.format(path, gist))
+    kind = "instruction" if os.path.basename(path).upper() == "CLAUDE.MD" else "memory"
+    csop.enforce(action, _ASK.format(path, gist, kind))
 
 
 if __name__ == "__main__":
