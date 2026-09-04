@@ -9,6 +9,7 @@
 
 SHELL := bash
 PY    := python3
+REQ_CC := 2.1.196
 
 # ANSI colors -- real ESC bytes so plain `echo` renders them; unset with NO_COLOR=1.
 ESC    := $(shell printf '\033')
@@ -30,113 +31,103 @@ RESET :=
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help init install validate ci check clean
+.PHONY: help init install test validate ci check clean version-check update.siblings
+
+# Where `update.siblings` looks for consumer projects; override on the CLI.
+SIBLING_ROOT ?= $(HOME)/code
+
+# A vendored checkout is a pinned mirror, so it is reset onto upstream, not pulled.
 
 help: ## Show available targets
 	@echo "$(BOLD)CSOP make targets$(RESET)"
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  $(CYAN)%-7s$(RESET) %s\n",$$1,$$2}'
+	@grep -E '^[a-zA-Z_.-]+:.*?## ' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  $(CYAN)%-16s$(RESET) %s\n",$$1,$$2}'
 
-init: ## Enable CSOP in this repo (self-host)
+version-check: ## Verify Claude Code is new enough for ${CLAUDE_PROJECT_DIR} in slash commands
+	@if [ -n "$(SKIP_VERSION_CHECK)" ]; then echo "$(GREEN)skip:$(RESET) version check (SKIP_VERSION_CHECK set)"; exit 0; fi; \
+	 ver="$$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"; \
+	 if [ -z "$$ver" ] && [ -n "$$CLAUDE_CODE_EXECPATH" ] && [ -x "$$CLAUDE_CODE_EXECPATH" ]; then \
+	   ver="$$("$$CLAUDE_CODE_EXECPATH" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"; \
+	   [ -n "$$ver" ] && echo "$(DIM)note:$(RESET) 'claude' not on PATH (entrypoint: $${CLAUDE_CODE_ENTRYPOINT:-unknown}); used \$$CLAUDE_CODE_EXECPATH instead"; \
+	 fi; \
+	 if [ -z "$$ver" ]; then echo "$(RED)error:$(RESET) 'claude' CLI not found on PATH or via \$$CLAUDE_CODE_EXECPATH; CSOP slash commands need Claude Code >= $(REQ_CC). (bypass: make ... SKIP_VERSION_CHECK=1)"; exit 1; fi; \
+	 $(PY) -c "import sys;c=tuple(map(int,'$$ver'.split('.')));r=tuple(map(int,'$(REQ_CC)'.split('.')));sys.exit(0 if c>=r else 1)" \
+	   || { echo "$(RED)refusing:$(RESET) Claude Code $$ver is too old. CSOP slash commands resolve csop.py via \$${CLAUDE_PROJECT_DIR}, which is substituted in a command body only on $(REQ_CC)+. Upgrade the CLI, then re-run. (bypass at your own risk: make ... SKIP_VERSION_CHECK=1)"; exit 1; }; \
+	 echo "$(GREEN)ok:$(RESET) Claude Code $$ver (>= $(REQ_CC))"
+
+init: version-check ## Enable CSOP in this repo (self-host)
 	@$(PY) --version >/dev/null 2>&1 || { echo "$(RED)ERROR:$(RESET) python3 not on PATH (CSOP's only dependency)"; exit 1; }
 	@$(PY) -c "import json;[json.load(open(f)) for f in ('.claude-plugin/plugin.json','hooks/hooks.json')]" \
 	  && echo "$(GREEN)validated:$(RESET) manifest + wiring JSON"
 	@if [ -f .claude/csop.json ]; then $(PY) -c "import sys;sys.path.insert(0,'hooks');import csop;csop.loads_jsonc(open('.claude/csop.json').read())" \
 	  && echo "$(GREEN)validated:$(RESET) project config (json5)"; fi
 	@for f in hooks/*.py; do $(PY) -c "import ast;ast.parse(open('$$f').read())" || exit 1; done; echo "$(GREEN)validated:$(RESET) hooks parse"
-	@mkdir -p .claude/commands
-	@cp -f commands/*.md .claude/commands/
-	@sed -i 's#"$${CLAUDE_PLUGIN_ROOT}/hooks/csop.py"#hooks/csop.py#g' .claude/commands/*.md
-	@echo "$(GREEN)materialized$(RESET) project commands -> .claude/commands/ (relative, pre-allowed)"
+	@$(PY) tools/sync_commands.py commands .claude/commands .
+	@echo "$(GREEN)materialized$(RESET) project commands -> .claude/commands/ (CLAUDE_PROJECT_DIR-anchored; needs Claude Code v2.1.196+)"
 	@echo ""
 	@echo "$(BOLD)CSOP is initialized for this repo:$(RESET)"
 	@echo "  * $(CYAN)hooks$(RESET)   : wired in .claude/settings.json (approve workspace trust next session)"
-	@echo "  * $(CYAN)enable$(RESET)  : /csop enable iso        (or bare: $(PY) hooks/csop.py enable iso)"
-	@echo "  * $(CYAN)inspect$(RESET) : /csop  |  /csop catalog"
+	@echo "  * $(CYAN)enable$(RESET)  : /sop enable iso         (or bare: $(PY) hooks/csop.py enable iso)"
+	@echo "  * $(CYAN)inspect$(RESET) : /sop  |  /sop catalog"
 
-install: ## Wire CSOP into a consumer project (run from a submodule checkout)
+install: version-check ## Wire CSOP into a consumer project (run from a submodule checkout)
 	@root="$${DEST:-$$(git rev-parse --show-superproject-working-tree 2>/dev/null)}"; \
-	 [ -n "$$root" ] || { echo "$(RED)ERROR:$(RESET) run from a submodule checkout, or pass DEST=<project-root>"; exit 1; }; \
-	 rel="$$($(PY) -c 'import os,sys;print(os.path.relpath(os.getcwd(),sys.argv[1]))' "$$root")"; \
+	 [ -n "$$root" ] || { echo "$(RED)error:$(RESET) run from a submodule checkout, or pass DEST=<project-root>"; exit 1; }; \
+	 rel="$$($(PY) -c 'import os,sys;print(os.path.relpath(os.path.realpath(os.getcwd()),os.path.realpath(sys.argv[1])))' "$$root")"; \
 	 mkdir -p "$$root/.claude/commands"; \
-	 dest="$$root/.claude/settings.json"; \
-	 if [ -e "$$dest" ]; then \
-	   echo "$(YELLOW)note:$(RESET) $$dest exists -- merge $$rel/hooks/hooks.json into its \"hooks\" (rewrite \$${CLAUDE_PLUGIN_ROOT} -> \$${CLAUDE_PROJECT_DIR}/$$rel)"; \
-	 else \
-	   { echo '{ "hooks":'; sed "s#\$${CLAUDE_PLUGIN_ROOT}#\$${CLAUDE_PROJECT_DIR}/$$rel#g" hooks/hooks.json; echo '}'; } > "$$dest"; \
-	   echo "$(GREEN)wrote$(RESET) $$dest  (hooks -> $$rel/hooks/)"; \
-	 fi; \
-	 for f in commands/*.md; do sed "s#\"\$${CLAUDE_PLUGIN_ROOT}/hooks/csop.py\"#$$rel/hooks/csop.py#g" "$$f" > "$$root/.claude/commands/$$(basename "$$f")"; done; \
-	 echo "$(GREEN)materialized$(RESET) /discipline /csop /disc -> .claude/commands/"; \
-	 echo "next: gitignore $(CYAN).claude/csop-state/$(RESET) ; start a session in $$root and approve workspace trust"
+	 merged="$$($(PY) tools/merge_settings.py "$$root/.claude/settings.json" "$$rel" hooks/hooks.json)"; \
+	 cmdlog="$$($(PY) tools/sync_commands.py commands "$$root/.claude/commands" "$$rel")" || exit 1; \
+	 gi="$$root/.gitignore"; \
+	 if [ -f "$$gi" ] && grep -qxF ".claude/csop-state/" "$$gi"; then gi_st="already ignored"; else printf '%s\n' ".claude/csop-state/" >> "$$gi"; gi_st="added .claude/csop-state/ (runtime state)"; fi; \
+	 printf '\n$(BOLD)CSOP installed$(RESET) into %s\n\n$(BOLD)changed$(RESET)\n' "$$root"; \
+	 printf '  %-24s %s\n' ".claude/settings.json" "merged CSOP hooks and permissions.allow ($$merged), preserving your settings"; \
+	 printf '  %-24s %s\n' ".claude/commands/" "synced (a command CSOP has retired is pruned; anything else is left alone)"; \
+	 printf '%s\n' "$$cmdlog"; \
+	 printf '  %-24s %s\n' ".gitignore" "$$gi_st"; \
+	 printf '\nActive on your next Claude Code session here. hacc, scratch, hyg are on by default; %s adds more.\n' "$(CYAN)/sop enable <name>$(RESET)"
 
-check: ## Offline smoke-test hooks + CLI (no live session)
-	@bash -c '\
-	  set -u; D=$$(mktemp -d); export CLAUDE_PLUGIN_DATA=$$D CLAUDE_SESSION_ID=makecheck; \
-	  $(PY) hooks/csop.py catalog >/dev/null && echo "cli catalog : $(GREEN)OK$(RESET)"; \
-	  $(PY) hooks/csop.py enable iso >/dev/null && echo "cli enable  : $(GREEN)OK$(RESET)"; \
-	  ev="{\"session_id\":\"makecheck\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git worktree add /tmp/x HEAD\"}}"; \
-	  printf "%s" "$$ev" | $(PY) hooks/gate_bashverb.py >/dev/null 2>&1; \
-	  test $$? -eq 2 && echo "gate block  : $(GREEN)OK$(RESET)" || { echo "gate block  : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) -c "import sys;sys.path.insert(0,\"hooks\");import disciplines as d;bad=[r for x in d.DISCIPLINES for r in x.requires if not d.by_codename(r)];sys.exit(1 if bad else 0)" \
-	    && echo "requires ok : $(GREEN)OK$(RESET)" || { echo "requires ok : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) hooks/csop.py enable techwrite | grep -q hyg \
-	    && echo "requires dep: $(GREEN)OK$(RESET)" || { echo "requires dep: $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) -c "import sys;sys.path.insert(0,\"hooks\");import disciplines as d;sys.exit(0 if d.FeatureSpike.spike_dir.startswith(d.Scratch.scratch_dir) and \"scratch/\" in d.FeatureSpike.render(\"reminder\") else 1)" \
-	    && echo "sibling ref : $(GREEN)OK$(RESET)" || { echo "sibling ref : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) hooks/csop.py enable iso >/dev/null; \
-	  eve="{\"session_id\":\"makecheck\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"scratch/iso/mk/x\"}}"; \
-	  evb="{\"session_id\":\"makecheck\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git worktree add scratch/iso/mk HEAD\"}}"; \
-	  printf "%s" "$$eve" | $(PY) hooks/gate_isowrite.py >/dev/null 2>&1; test $$? -eq 2 && A=1 || A=0; \
-	  printf "%s" "$$evb" | $(PY) hooks/gate_bashverb.py >/dev/null 2>&1; \
-	  printf "%s" "$$eve" | $(PY) hooks/gate_isowrite.py >/dev/null 2>&1; test $$? -eq 0 && B=1 || B=0; \
-	  test "$$A$$B" = "11" && echo "iso own     : $(GREEN)OK$(RESET)" || { echo "iso own     : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) hooks/csop.py enable hacc >/dev/null; \
-	  gc="{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m x\"}}"; \
-	  gi="{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C scratch/iso/mk rebase main\"}}"; \
-	  gp="{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C scratch/iso/mk push\"}}"; \
-	  printf "%s" "$$gc" | $(PY) hooks/gate_git.py | grep -q deny && H1=1 || H1=0; \
-	  printf "%s" "$$gi" | $(PY) hooks/gate_git.py | grep -q deny && H2=1 || H2=0; \
-	  printf "%s" "$$gp" | $(PY) hooks/gate_git.py | grep -q deny && H3=1 || H3=0; \
-	  test "$$H1$$H2$$H3" = "101" && echo "hacc iso    : $(GREEN)OK$(RESET)" || { echo "hacc iso    : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  $(PY) hooks/csop.py enable dream >/dev/null; \
-	  do_="{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"src/x.py\"}}"; \
-	  di="{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"scratch/x.py\"}}"; \
-	  printf "%s" "$$do_" | $(PY) hooks/gate_dreamwrite.py | grep -q deny && M1=1 || M1=0; \
-	  printf "%s" "$$di" | $(PY) hooks/gate_dreamwrite.py | grep -q deny && M2=1 || M2=0; \
-	  test "$$M1$$M2" = "10" && echo "dream write : $(GREEN)OK$(RESET)" || { echo "dream write : $(RED)FAIL$(RESET)"; exit 1; }; \
-	  P2=$$(mktemp -d); mkdir -p "$$P2/.claude"; \
-	  printf "a\n# FROZEN\nsecret=1\n# END\nb\n" > "$$P2/conf.py"; \
-	  printf "%s" "{ \"freeze\": {\"default_enabled\": true, \"frozen\": [ {\"path\":\"conf.py\",\"regex\":\"# FROZEN.*# END\"} ] } }" > "$$P2/.claude/csop.json"; \
-	  ri="{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"conf.py\",\"old_string\":\"secret=1\"}}"; \
-	  ro="{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"conf.py\",\"old_string\":\"a\"}}"; \
-	  CLAUDE_PROJECT_DIR="$$P2" $(PY) hooks/csop.py enable freeze >/dev/null; \
-	  printf "%s" "$$ri" | CLAUDE_PROJECT_DIR="$$P2" $(PY) hooks/gate_pathblock.py >/dev/null 2>&1; test $$? -eq 2 && G1=1 || G1=0; \
-	  printf "%s" "$$ro" | CLAUDE_PROJECT_DIR="$$P2" $(PY) hooks/gate_pathblock.py >/dev/null 2>&1; test $$? -eq 0 && G2=1 || G2=0; \
-	  test "$$G1$$G2" = "11" && echo "freeze region: $(GREEN)OK$(RESET)" || { echo "freeze region: $(RED)FAIL$(RESET)"; exit 1; }; \
-	  rm -rf "$$P2"; \
-	  rm -f -- "$$D"/*.json 2>/dev/null; rmdir "$$D" 2>/dev/null || true'
+test: ## Run the offline test suite (tests/test_csop.py)
+	@$(PY) -m unittest -v tests.test_csop
 
-validate: ## Static sanity: every hook parses (py) + configs valid (json / jsonc)
-	@bash -c '\
-	  set -u; ok=1; \
-	  for f in hooks/*.py; do \
-	    $(PY) -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" \
-	      && echo "  py    $(GREEN)ok$(RESET)   $$f" || { echo "  py    $(RED)FAIL$(RESET) $$f"; ok=0; }; \
-	  done; \
-	  for f in .claude-plugin/plugin.json hooks/hooks.json .claude/settings.json; do \
-	    [ -f "$$f" ] || continue; \
-	    $(PY) -c "import json,sys; json.load(open(sys.argv[1]))" "$$f" \
-	      && echo "  json  $(GREEN)ok$(RESET)   $$f" || { echo "  json  $(RED)FAIL$(RESET) $$f"; ok=0; }; \
-	  done; \
-	  for f in .claude/csop.json; do \
-	    [ -f "$$f" ] || continue; \
-	    $(PY) -c "import sys; sys.path.insert(0,\"hooks\"); import csop; csop.loads_jsonc(open(sys.argv[1]).read())" "$$f" \
-	      && echo "  jsonc $(GREEN)ok$(RESET)   $$f" || { echo "  jsonc $(RED)FAIL$(RESET) $$f"; ok=0; }; \
-	  done; \
-	  test $$ok -eq 1 && echo "$(GREEN)validate:$(RESET) all sanity checks passed" || { echo "$(RED)validate: FAILURES$(RESET)"; exit 1; }'
+check: ## Offline test suite: static sanity + gates + CLI + config resolution
+	@$(PY) -m unittest -v tests.test_csop
+
+validate: ## Static sanity: hooks parse + configs valid (json / jsonc)
+	@$(PY) -m unittest -v tests.test_csop.StaticChecks
 
 ci: validate check ## Run the full offline CI gate (validate + check)
+
+update.siblings: version-check ## Reset every .claude/csop submodule under ~/code (SIBLING_ROOT) to upstream, then re-wire it
+	@root="$(SIBLING_ROOT)"; \
+	 [ -d "$$root" ] || { echo "$(RED)error:$(RESET) $$root is not a directory (override with SIBLING_ROOT=<path>)"; exit 1; }; \
+	 echo "$(BOLD)scanning$(RESET) $$root for .claude/csop submodules"; \
+	 found=0; ok=0; fail=0; \
+	 while IFS= read -r d; do \
+	   git -C "$$d" rev-parse --git-dir >/dev/null 2>&1 || continue; \
+	   super="$$(git -C "$$d" rev-parse --show-superproject-working-tree 2>/dev/null)"; \
+	   [ -n "$$super" ] || { echo "  $(DIM)skip$(RESET)  $$d (not a submodule)"; continue; }; \
+	   found=$$((found+1)); \
+	   ins=""; \
+	   if [ -n "$$(git -C "$$d" status --porcelain --untracked-files=no 2>/dev/null)" ]; then \
+	     fail=$$((fail+1)); \
+	     echo "  $(RED)fail$(RESET)  $$d $(DIM)(tracked local edits; commit or discard them, then re-run)$(RESET)"; \
+	     continue; \
+	   fi; \
+	   up="$$(git -C "$$d" rev-parse --abbrev-ref '@{u}' 2>/dev/null)"; \
+	   [ -n "$$up" ] || up="origin/$$(git -C "$$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"; \
+	   if out="$$(git -C "$$d" fetch --prune 2>&1 && git -C "$$d" reset --hard "$$up" 2>&1)" \
+	      && ins="$$($(MAKE) -s -C "$$d" install NO_COLOR=1 SKIP_VERSION_CHECK=1 2>&1)"; then \
+	     ok=$$((ok+1)); \
+	     echo "  $(GREEN)ok$(RESET)    $$d"; \
+	     printf '%s\n' "$$ins" | sed 's/^/        /'; \
+	   else \
+	     fail=$$((fail+1)); \
+	     echo "  $(RED)fail$(RESET)  $$d"; \
+	     printf '%s\n%s\n' "$$out" "$$ins" | sed 's/^/        /'; \
+	   fi; \
+	 done < <(find "$$root" -type d -name .claude -not -path '*/.git/*' -exec test -d '{}/csop' \; -print 2>/dev/null | sed 's#$$#/csop#' | sort); \
+	 echo "$(BOLD)done$(RESET) $$found submodule(s): $(GREEN)$$ok ok$(RESET), $(RED)$$fail failed$(RESET)"; \
+	 [ "$$fail" -eq 0 ]
 
 clean: ## Remove generated discovery surface + local state
 	@rm -f -- .claude/commands/*.md 2>/dev/null || true

@@ -1,27 +1,10 @@
 #!/usr/bin/env python3
 """PreToolUse gate: Frozen Features (codename `freeze`) -- protected paths + regions.
 
-When `freeze` is active, a tool call that touches one of the discipline's `frozen`
-entries is stopped. An entry is a PATH FRAGMENT (substring-matched against any
-touched file_path / path / glob / Bash command) protecting a whole file or a
-directory subtree, or a mapping that adds a mode, a rationale, a redirect, and
-optionally a REGION within a file.
-
-Whole-path modes. In "no-write" (the default) the path is protected from
-modification: Edit / Write / MultiEdit / NotebookEdit are stopped while reads
-pass. In "no-touch" READS are stopped too (Read / Grep / Glob and any Bash
-command referencing the path), for a generated copy where reading the stale
-artifact is itself a trap.
-
-File regions. A mapping may carry `regex` (markers that bracket a protected
-region -- a proper HARD gate: a write whose edited text overlaps a match is
-stopped) and / or `prose` (a natural-language description of the region -- a soft
-NUDGE, since prose cannot be located precisely). Regions concern writes only;
-reads pass. The rest of the file stays editable.
-
-The stop message carries the entry's why / use / prose. Enforcement strength for
-whole-path and regex hits is the discipline's action (block / deny / ask / nudge);
-prose is always a nudge. Fail-open; escape hatch CSOP_FREEZE=off.
+A tool call touching one of the discipline's `frozen` entries is stopped: a whole
+path under `no-write` / `no-touch` / `no-restructure`, or a region of a file
+matched by `regex` (hard) or described in `prose` (a nudge). Modes, matching, and
+`exempt` are in docs/gate-internals.md. Fail-open; escape hatch CSOP_FREEZE=off.
 """
 import os
 import re
@@ -37,6 +20,8 @@ DISCIPLINE = _FREEZE.codename
 _WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 _READ_TOOLS = ("Read", "Grep", "Glob", "Bash")
 
+_BAD = []                                 # frozen entries dropped as unusable
+
 
 def _entries():
     default_mode = _FREEZE.get("mode") or "no-write"
@@ -47,10 +32,13 @@ def _entries():
             if path:
                 out.append({"path": path, "mode": item.get("mode") or default_mode,
                             "why": item.get("why", ""), "use": item.get("use", ""),
-                            "regex": item.get("regex", ""), "prose": item.get("prose", "")})
+                            "regex": item.get("regex", ""), "prose": item.get("prose", ""),
+                            "exempt": item.get("exempt") or []})
+            else:
+                _BAD.append("no `path` key: {0}".format(sorted(item)))
         elif item:
             out.append({"path": item, "mode": default_mode, "why": "", "use": "",
-                        "regex": "", "prose": ""})
+                        "regex": "", "prose": "", "exempt": []})
     return out
 
 
@@ -65,9 +53,25 @@ def _texts(tool, ti):
 
 
 def _applies(mode, tool):
+    if mode == "no-restructure":
+        return False                      # only the destructive-Bash branch gates this mode
     if tool in _WRITE_TOOLS:
         return True
     return mode == "no-touch" and tool in _READ_TOOLS
+
+
+def _refs(path, text):
+    """True if `text` mentions `path` not preceded by a word char, so a fragment
+    like `.cmk/` is not matched inside `foo.cmk/`. Falls back to substring."""
+    try:
+        return re.search(r"(?<!\w)" + re.escape(path), text or "") is not None
+    except Exception:
+        return bool(path) and path in (text or "")
+
+
+def _exempt(entry, *texts):
+    frags = entry.get("exempt") or []
+    return any(x and any(x in t for t in texts if t) for x in frags)
 
 
 def _read(fpath):
@@ -125,7 +129,7 @@ def _prose_hit(entry, ti):
 
 
 def _region_msg(entry):
-    parts = ["Frozen Features ({0}): a protected REGION of `{1}` is off-limits.".format(
+    parts = ["Frozen Features ({0}): a protected region of `{1}` is off-limits.".format(
         DISCIPLINE, entry["path"])]
     if entry["prose"]:
         parts.append("Region: " + entry["prose"] + ".")
@@ -137,16 +141,29 @@ def _region_msg(entry):
     return "\n".join(parts)
 
 
+def _restructure_msg(entry, verbs):
+    parts = ["Frozen Features ({0}): `{1}` must not be restructured by shell "
+             "({2}); edit its files in place with the Edit/Write tool instead.".format(
+                 DISCIPLINE, entry["path"], "/".join(verbs))]
+    if entry["why"]:
+        parts.append(entry["why"])
+    if entry["use"]:
+        parts.append("Use `{0}` instead.".format(entry["use"]))
+    parts.append("A non-liftable rule belongs in the harness deny-list; this hook "
+                 "still lifts with CSOP_FREEZE=off.")
+    return "\n".join(parts)
+
+
 def _path_msg(entry):
     kind = ("a no-touch path (reads and writes both trap)"
             if entry["mode"] == "no-touch" else "a frozen path (do not modify)")
-    parts = ["Frozen Features ({0}): `{1}` is {2} and is OFF-LIMITS.".format(
+    parts = ["Frozen Features ({0}): `{1}` is {2} and is off-limits.".format(
         DISCIPLINE, entry["path"], kind)]
     if entry["why"]:
         parts.append(entry["why"])
     if entry["use"]:
         parts.append("Use the source `{0}` instead.".format(entry["use"]))
-    parts.append("If the human EXPLICITLY authorized this, escape hatch: "
+    parts.append("If the human explicitly authorized this, escape hatch: "
                  "CSOP_FREEZE=off.")
     return "\n".join(parts)
 
@@ -165,6 +182,16 @@ def main():
         for e in entries:                     # prose-only regions nudge
             if e["prose"] and not e["regex"] and _prose_hit(e, ti):
                 csop.nudge(_region_msg(e))
+    if tool == "Bash":                        # shell restructure of a frozen subtree
+        cmd = ti.get("command", "") or ""
+        cwd = event.get("cwd", "") or ""      # exempt a worktree by its invocation dir too
+        verbs = csop.destructive_verbs(cmd)
+        if verbs:
+            for e in entries:
+                if e["regex"] or e["prose"] or e["mode"] not in ("no-write", "no-restructure"):
+                    continue
+                if _refs(e["path"], cmd) and not _exempt(e, cmd, cwd):
+                    csop.enforce(_FREEZE.get("action"), _restructure_msg(e, verbs))
     texts = _texts(tool, ti)
     if texts:
         for e in entries:                     # whole-path entries
@@ -172,7 +199,7 @@ def main():
                 continue
             if _applies(e["mode"], tool) and any(t and e["path"] in t for t in texts):
                 csop.enforce(_FREEZE.get("action"), _path_msg(e))
-    csop.allow()
+    csop.dropped(_FREEZE.name, DISCIPLINE, _BAD)
 
 
 if __name__ == "__main__":

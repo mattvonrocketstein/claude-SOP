@@ -4,19 +4,18 @@ description: Awareness and management for CSOP process disciplines (SOPs). Invok
 ---
 # Disciplines (SOPs)
 
-A **discipline** is a process-level protocol (a components of a SOP) which is enforced deterministically by hooks. Disciplines are **toggleable**: enable one per session and it latches
-active until `/clear`; there is no mid-session disable. Each has a **name** (e.g.
+A **discipline** is a process-level protocol (a components of a SOP) which is enforced deterministically by hooks. Disciplines are **toggleable**: enable one per session. Each has a **name** (e.g.
 `IsolatedTree`), a **description**, and a **codename** (e.g. `iso`).
 
 ## Managing disciplines
 
-`/discipline` (aliases `/csop`, `/disc`) forwards its arguments VERBATIM to the
-one CLI — `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
+`/sop` forwards its arguments VERBATIM to the one CLI, so `/sop <args>` ≡
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <args>`:
 
-- `enable <name|codename>` — activate a discipline (e.g. `IsolatedTree` or `iso`);
-  sticky until `/clear`.
-- `list` — show active disciplines (also the no-arg default).
-- `catalog` — list all known disciplines.
+- `enable <name|codename>`: activate a discipline (e.g. `IsolatedTree` or `iso`).
+- `list`: show active disciplines (also the no-arg default).
+- `catalog`: every discipline, one line each, with a `*` on the active ones.
+- `show <name|codename>`: one discipline in full (defaults, requires, config keys).
 - Disarm all: `/clear`.
 
 ## Two halves of a discipline
@@ -33,4 +32,4 @@ one CLI — `/csop <args>` ≡ `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/csop.py" <a
 When enabled, risky/experimental changes to a project's **core** must be
 prototyped in an **iso-tree** (an isolated `git worktree` under a crash-safe,
 in-repo, gitignored dir -- convention `scratch/iso/` -- never `/tmp`). The
-`gate_bashverb` hook blocks `git worktree add` targeting anywhere else.
+`csop-gate-bashverb` hook blocks `git worktree add` targeting anywhere else.
