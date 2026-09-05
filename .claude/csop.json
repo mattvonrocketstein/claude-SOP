@@ -29,6 +29,16 @@
     "default_enabled": true          // this repo is mostly prose; implies hyg
   },
 
+  // the family config lives under `tdd`; `py-tdd` inherits it and adds pytest regexes
+  "tdd": {
+    "runner_patterns": ["\\bpython[0-9.]*\\s+-m\\s+unittest\\b", "\\bmake\\s+(?:check|ci|validate)\\b"],
+    "suite_roots": ["tests.test_csop"],   // the one test module is the whole suite
+    "example": "python3 -m unittest -k <name> tests.test_csop"
+  },
+  "py-tdd": {
+    "default_enabled": true          // dogfood: hypothesis-first, suite runs ask
+  },
+
   "freeze": {
     "default_enabled": true,
     "frozen": [
