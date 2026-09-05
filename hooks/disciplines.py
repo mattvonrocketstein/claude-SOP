@@ -328,24 +328,101 @@ class FrozenFeatures(Discipline):
                    "pathblock over `frozen`.")
 
 
-class TestDrivenDevelopment(Discipline):
+class TestingDiscipline(Discipline):
     codename = "tdd"
-    name = "Test-Driven Development"
+    name = "Testing Discipline"
     default_enabled = False
-    test_globs = ["**/test_*.py", "**/*_test.*", "**/*.test.*", "tests/**", "spec/**"]
-    src_globs = ["src/**", "lib/**"]
-    test_command = "make test"
-    action = "nudge"
-    nudge = ("Test-Driven Development active: write a failing test first, then "
-                "implement to green; don't change implementation without a "
-                "matching test; run `{test_command}` after each change.")
-    overridable = ("default_enabled", "test_globs", "src_globs", "test_command",
-                   "action", "nudge")
-    description = ("Tests-first workflow: a failing test precedes implementation; "
-                   "implementation (`src_globs`) shouldn't change without a "
-                   "matching test (`test_globs`); run `test_command` after "
-                   "changes. Draft gate: nudge on src edits lacking a recent test "
-                   "edit.")
+    test_command = "make test"        # the suite command; also a runner pattern
+    runner_patterns = []              # regexes that mean "this command runs tests"
+    narrow_patterns = []              # regexes that mean "already scoped down"
+    suite_markers = []                # markers big enough to count as a suite run
+    suite_roots = ["tests", "test", "."]
+    value_options = ["-k", "-m", "-p", "-o", "-c", "-W", "-n", "-e",
+                     "--rootdir", "--confcutdir"]
+    hypothesis_pattern = r"\b(expect|should|hypothes|prove|falsif|predict|believe)"
+    hypothesis_action = "block"       # the agent restates and retries; no human cost
+    example = ""                      # a project's canonical narrow invocation
+    test_globs = ["**/test_*.py", "**/*_test.*", "**/*.test.*", "spec/**"]
+    src_globs = ["src/**", "lib/**", "hooks/**"]
+    action = "ask"                    # a suite run is the human's gate
+    nudge = ("Testing Discipline active: no hypothesis, no test run. Say in one "
+                "sentence what you expect and what result would prove you wrong, "
+                "in the Bash call's description; 'check nothing broke' is a full "
+                "suite in disguise. Run the narrowest scope that can falsify it and "
+                "stop when it does: one test or one file first; then the tests that "
+                "touch the same symbol, found by grep; then a topic marker, only "
+                "for a change to a shared mechanism you can name; the full suite "
+                "last, with the human's opt-in. Each step up needs a stated reason. "
+                "A run longer than a few minutes gets an estimate first, runs in "
+                "the background, and gets status while it runs.")
+    reminder = ("Testing Discipline follow-up: report what ran, verbatim, with its "
+                "counts. Never describe a narrow run in words that imply a broad "
+                "one, and never carry a result across a change in state without "
+                "saying so. A failure is not a regression until reproduced on "
+                "unchanged code.")
+    overridable = ("default_enabled", "test_command", "runner_patterns",
+                   "narrow_patterns", "suite_markers", "suite_roots",
+                   "value_options", "hypothesis_pattern", "hypothesis_action",
+                   "example", "test_globs", "src_globs", "action", "nudge",
+                   "reminder")
+    append = ("nudge", "reminder", "runner_patterns", "narrow_patterns",
+              "suite_markers", "suite_roots", "value_options", "test_globs",
+              "src_globs")
+
+    @classmethod
+    def get(cls, key):
+        """Discipline.get, plus project config under each parent codename first,
+        so a project keeps one `tdd` block that `py-tdd` inherits."""
+        val = getattr(cls, key)
+        if key not in cls.overridable:
+            return val
+        chain = [k for k in reversed(cls.__mro__)
+                 if issubclass(k, TestingDiscipline)]
+        for k in chain:
+            layers = [csop.project_config().get(k.codename, {})]
+            if k is cls:
+                layers.append(csop.stage_discipline(k.codename))
+            for layer in layers:
+                if isinstance(layer, dict) and key in layer:
+                    val = cls._append(val, layer[key]) if key in cls.append else layer[key]
+        return val
+
+    description = ("A response to reflexive suite runs: a test run needs a stated "
+                   "hypothesis, and a full-suite run needs the human's opt-in. A "
+                   "Bash command matching `runner_patterns` (or `test_command`) is "
+                   "a test run; its description must match `hypothesis_pattern` "
+                   "or `hypothesis_action` fires. The run is a suite run unless a "
+                   "`narrow_patterns` regex matches, a positional path outside "
+                   "`suite_roots` is given, or a marker not in `suite_markers` "
+                   "selects a topic; a suite run fires `action` (default ask), "
+                   "quoting `example` and a test file suggested from the last "
+                   "`src_globs` edit via `test_globs`. A PostToolUse reporter names "
+                   "every run and its scope in the modeline. The generic discipline "
+                   "ships no runner regexes beyond `test_command`; a language "
+                   "subclass such as `py-tdd` pre-rolls them. Gates: tdd over "
+                   "Bash; escape hatch CSOP_TDD=off.")
+
+
+class PythonTesting(TestingDiscipline):
+    codename = "py-tdd"
+    name = "Python Testing"
+    test_command = "pytest"
+    runner_patterns = [r"\bpytest\b", r"\bpython[0-9.]*\s+-m\s+pytest\b",
+                       r"\b(?:uv|poetry|pipenv|hatch|pdm)\s+run\s+pytest\b",
+                       r"(?:^|[;&|]\s*)tox\b", r"(?:^|[;&|]\s*)nox\b",
+                       r"\bmake\s+test\b"]
+    narrow_patterns = [r"\S+::\S+", r"\s-k[\s=]", r"--lf\b", r"--ff\b",
+                       r"--last-failed\b", r"--failed-first\b", r"--deselect\b",
+                       r"--sw\b", r"--stepwise\b"]
+    test_globs = ["**/test_*.py", "**/*_test.py"]
+    example = "pytest tests/test_<topic>.py::<TestClass>::<test_name> -q"
+    description = ("Testing Discipline specialized for pytest: runner regexes for "
+                   "pytest, python -m pytest, the uv/poetry/pipenv/hatch/pdm "
+                   "runners, tox, nox, and make test; narrowing by node id, -k, "
+                   "--lf/--ff, --deselect, --sw, a positional file, or a directory "
+                   "outside `suite_roots`. tox, nox, and make test always count as "
+                   "suite runs. A marker is a topic unless it appears in "
+                   "`suite_markers`. Same gate and escape hatch as `tdd`.")
 
 
 class FeatureSpike(Discipline):
@@ -505,8 +582,8 @@ class TechnicalWriter(Discipline):
     requires = ("hyg",)               # implies Generative Hygiene is on (does not extend it)
     banned = [chr(0x2014), "earns its keep", "fan-out",   # docs-code-ok
               "byte-identical", "load-bearing", "genuinely", "seam"]   # docs-code-ok
-    discouraged = ["gate", "leverage",
-                   "substrate"]   # prose-only jargon: warned about, never blocked
+    discouraged = ["gate", "leverage", "substrate", "ladder",
+                   "rung"]        # prose-only jargon: warned about, never blocked
     prose_globs = ["*.md", "*.markdown", "*.rst", "*.md.j2", "*.j2"]
     prose_rules = []             # project regexes for code leaking into doc prose
     token = "docs-code-ok"       # per-line opt-out marker in the doc source
@@ -536,7 +613,7 @@ class TechnicalWriter(Discipline):
                    "first. A rule with `in_spans` also checks inside backticks; a "
                    "line carrying `token` opts out; `exempt` basenames are skipped. "
                    "`discouraged` words (default `gate`, `leverage`, "
-                   "`substrate`) warn in prose "
+                   "`substrate`, `ladder`, `rung`) warn in prose "
                    "without ever blocking. prose_rules empty by default.")
 
 
@@ -677,8 +754,8 @@ class Filetypes(Discipline):
 
 
 DISCIPLINES = [IsoTree, HumanAccountability, RobotAccountability, Scratch,
-               Promotion, GenerativeHygiene, FrozenFeatures, TestDrivenDevelopment,
-               FeatureSpike, Performance, TacticalRetreat, Scientist,
+               Promotion, GenerativeHygiene, FrozenFeatures, TestingDiscipline,
+               PythonTesting, FeatureSpike, Performance, TacticalRetreat, Scientist,
                Stepwise, Consensus, Groomer, Toolsmith, TechnicalWriter,
                EntrypointsSandbox, Filetypes, Idiomatic,
                MemoryAccountability]

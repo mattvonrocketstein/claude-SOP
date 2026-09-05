@@ -23,7 +23,8 @@
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-git.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-scratch.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-entrypoints.py\"" },
-        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-racc.py\"" }
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-racc.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-tdd.py\"" }
       ]
     },
     {
@@ -67,7 +68,14 @@
       "hooks": [
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-react-ftypes.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-report-mem.py\"" },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-report-tdd.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-gate-promotion.py\"" }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-report-tdd.py\"" }
       ]
     }
   ],

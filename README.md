@@ -82,7 +82,8 @@ List below is incomplete!  Lots of in-flight WIP and experiments are in the repo
 | **Scratch** | `scratch` | on | [code](hooks/csop-gate-scratch.py) | Discourages/denies destructive commands, directing agent to use scratch folder. |
 | **Promotion** | `pro` | opt-in | [code](hooks/csop-gate-promotion.py) | Changes to core should be deliberate promotions of work proven in an iso-tree/scratch (small, tested, reviewable diffs), not ad-hoc edits. |
 | **[Frozen Features](#frozen-features)** | `freeze` | opt-in | [code](hooks/csop-gate-pathblock.py) | Protects frozen paths and file regions from access. |
-| **Test-Driven Development** | `tdd` | opt-in | [code](hooks/disciplines.py) | Tests-first workflow. |
+| **[Testing Discipline](#testing-discipline)** | `tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | No hypothesis, no test run; a full-suite run is the human's opt-in. Regex-gated. |
+| **[Python Testing](#testing-discipline)** | `py-tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | Testing Discipline pre-rolled for pytest. |
 | **Feature Spike** | `spike` | opt-in | [code](hooks/disciplines.py) | A time-boxed, throwaway exploratory spike to de-risk or learn. |
 | **Performance** | `perf` | opt-in | [code](hooks/disciplines.py) | Measure-first performance discipline. |
 | **Tactical Retreat** | `tactical` | opt-in | [code](hooks/disciplines.py) | When a change/experiment is going badly, cleanly retreat to a known-good state and rethink instead of accumulating hacks or churning flip/revert/flip. |
@@ -290,6 +291,58 @@ redirect would write a memory unobserved.
 - `allow_retraction`: let removal-only edits through (default true).
 - `excerpt_chars`: cap on quoted memory text in a prompt or modeline notice (default 200).
 - `default_enabled`: off by default.
+
+### Testing Discipline
+
+`tdd` · opt-in · enable with `/sop enable tdd`, or `/sop enable py-tdd` for the pytest subclass
+
+Not test-driven development. Given a suite, the agent runs all of it on every
+change, in place of a thought. This discipline makes the thought mandatory: a
+test run needs a stated hypothesis, and a full-suite run needs the human's
+opt-in.
+
+**Scope** (the nudge, every turn)
+
+Say what you expect and what result would prove you wrong. Run the narrowest
+scope that can falsify it, and stop when it does:
+
+1. One test, or one file.
+2. The tests that touch the same symbol, found by grep.
+3. A topic marker, only for a change to a shared mechanism you can name.
+4. The full suite. The human's call.
+
+A run longer than a few minutes gets an estimate first, runs in the background,
+and gets status while it runs.
+
+**Enforced** (Bash calls only)
+
+- **No hypothesis, no run.** A command matching `runner_patterns` or `test_command` is a test run. Its Bash `description` must match `hypothesis_pattern` (expect, should, prove, falsify, and kin) or `hypothesis_action` fires, default `block`: the agent restates and retries, with no prompt to the human.
+- **A suite run asks.** A test run is a suite run unless a `narrow_patterns` regex matches, a positional path outside `suite_roots` is given, or a `-m` marker not in `suite_markers` selects a topic. Then `action` fires, default `ask`. The prompt quotes the project's `example` and, after an edit to a `src_globs` file, names that file's tests found via `test_globs`.
+- **Every run is reported.** The end-of-turn modeline names each run with its scope (narrow, topic, suite) and the counts from its output.
+- **Escape hatch:** export `CSOP_TDD=off` for the whole family.
+
+With `py-tdd` on, this passes unprompted when its description reads "expect this to fail until the root check lands":
+
+```bash
+pytest tests/test_gate.py::TestSuite::test_bare_pytest_asks -q
+```
+
+A bare `pytest`, `pytest tests/`, `tox`, or `make test` opens a permission prompt instead.
+
+**`py-tdd`** is a Python subclass under its own codename. It pre-rolls the regexes: runners for `pytest`, `python -m pytest`, the uv/poetry/pipenv/hatch/pdm runners, `tox`, `nox`, and `make test`; narrowing by node id, `-k`, `--lf`/`--ff`, `--deselect`, `--sw`, a positional file, or a directory outside `suite_roots`. A project configures the family under one `tdd` block, which `py-tdd` reads before its own. The generic `tdd` ships no runner regexes beyond `test_command`.
+
+**Config** (`.claude/csop.json`; lists append to the defaults)
+
+- `runner_patterns`, `narrow_patterns`: regexes over the Bash command.
+- `suite_markers`: markers big enough to count as a suite run.
+- `suite_roots`: positional paths that still mean everything (default `tests`, `test`, `.`).
+- `value_options`: options that consume the next token.
+- `hypothesis_pattern`, `hypothesis_action`: the description check and what a miss does.
+- `example`: the project's canonical narrow invocation.
+- `test_command`: the suite command (`make test`; `pytest` under `py-tdd`).
+- `test_globs`, `src_globs`: how the last source edit maps to a suggested test file.
+- `action`: what a suite run does (default `ask`).
+- `nudge`, `reminder`: appended to the built-in text; project rules go here, such as the directory to run from.
 
 ### Generative Hygiene
 

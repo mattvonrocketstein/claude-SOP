@@ -54,6 +54,10 @@ def _denied(cp):
     return cp.returncode == 2 or b'"deny"' in cp.stdout
 
 
+def _asked(cp):
+    return b'"ask"' in cp.stdout
+
+
 def _write(path, body):
     with open(path, "w") as f:
         f.write(body)
@@ -73,8 +77,16 @@ def _wr(path, body):
     return {"tool_name": "Write", "tool_input": {"file_path": path, "content": body}}
 
 
-def _bash(cmd):
-    return {"tool_name": "Bash", "tool_input": {"command": cmd}}
+def _bash(cmd, description=None):
+    ti = {"command": cmd}
+    if description is not None:
+        ti["description"] = description
+    return {"tool_name": "Bash", "tool_input": ti}
+
+
+def _run(cmd, hyp="I expect this to pass"):
+    """A test-run Bash event that already carries a hypothesis."""
+    return _bash(cmd, hyp)
 
 
 def _edit(path=None, old="x", new="y"):
@@ -998,6 +1010,118 @@ class GateChecks(unittest.TestCase):
         cmd = "python3 %s reset" % os.path.join(HOOKS, "csop.py")
         self.assertEqual(_gate("csop-gate-disarm.py", _bash(cmd), env).returncode, 2)
 
+    # ---- Testing Discipline (tdd / py-tdd) ----
+
+    def test_tdd_inactive_passes(self):
+        env = _env()
+        cp = _gate("csop-gate-tdd.py", _bash("pytest"), env)
+        self.assertEqual(cp.returncode, 0); self.assertFalse(_asked(cp))
+
+    def test_tdd_suite_run_asks(self):
+        env = _env(); _cli(["enable", "py-tdd"], env)
+        for cmd in ("pytest", "pytest -q", "pytest tests/", "pytest ./tests -x",
+                    "python -m pytest", "uv run pytest", "tox", "tox -e py311",
+                    "nox", "make test", "cd tests && ../.venv/bin/pytest -q",
+                    "make test 2>&1 | tail -3", "pytest > out.txt 2>&1",
+                    "pytest -q >> log", "pytest < /dev/null"):
+            cp = _gate("csop-gate-tdd.py", _run(cmd), env)
+            self.assertTrue(_asked(cp), cmd)
+            self.assertIn("full-suite run", cp.stdout.decode())
+
+    def test_tdd_narrow_run_passes(self):
+        env = _env(); _cli(["enable", "py-tdd"], env)
+        for cmd in ("pytest tests/test_x.py -q", "pytest tests/test_x.py::T::t",
+                    "pytest -k foo", "pytest --lf", "pytest tests/unit",
+                    "python -m pytest tests/test_x.py", "pytest -m callform -q",
+                    "cd tests && ../.venv/bin/pytest test_x.py -q",
+                    "pytest --deselect tests/test_x.py::t tests/test_y.py"):
+            cp = _gate("csop-gate-tdd.py", _run(cmd), env)
+            self.assertEqual(cp.returncode, 0, cmd); self.assertFalse(_asked(cp), cmd)
+
+    def test_tdd_non_test_command_ignored(self):
+        env = _env(); _cli(["enable", "py-tdd"], env)
+        for cmd in ("ls tests/", "grep -rn pytest docs/", "cat pytest.ini",
+                    "echo pytest && ls"):
+            cp = _gate("csop-gate-tdd.py", _bash(cmd), env)
+            self.assertEqual(cp.returncode, 0, cmd); self.assertFalse(_asked(cp), cmd)
+
+    def test_tdd_hypothesis_required(self):
+        env = _env(); _cli(["enable", "py-tdd"], env)
+        cp = _gate("csop-gate-tdd.py", _bash("pytest tests/test_x.py"), env)
+        self.assertEqual(cp.returncode, 2)
+        self.assertIn("no hypothesis", cp.stderr.decode())
+        cp = _gate("csop-gate-tdd.py", _bash("pytest tests/test_x.py", "Run the gate tests"), env)
+        self.assertEqual(cp.returncode, 2)
+        for d in ("I expect this to pass", "should fail until the fix lands",
+                  "Hypothesis: the root check is wrong"):
+            cp = _gate("csop-gate-tdd.py", _bash("pytest tests/test_x.py", d), env)
+            self.assertEqual(cp.returncode, 0, d)
+        # the hypothesis check precedes the suite ask
+        cp = _gate("csop-gate-tdd.py", _bash("pytest"), env)
+        self.assertEqual(cp.returncode, 2)
+
+    def test_tdd_suite_markers(self):
+        proj = _project({"tdd": {"suite_markers": ["compiler"]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "py-tdd"], env)
+        self.assertTrue(_asked(_gate("csop-gate-tdd.py", _run("pytest -m compiler"), env)))
+        self.assertTrue(_asked(_gate("csop-gate-tdd.py",
+                                     _run("pytest -m 'compiler and not slow'"), env)))
+        self.assertFalse(_asked(_gate("csop-gate-tdd.py", _run("pytest -m callform"), env)))
+        # a marker value is never read as a narrowing path
+        self.assertTrue(_asked(_gate("csop-gate-tdd.py", _run("pytest -m compiler -q"), env)))
+
+    def test_tdd_config_regexes_append(self):
+        proj = _project({"tdd": {"runner_patterns": [r"\bcargo\s+test\b", "(bad["],
+                                 "narrow_patterns": [r"\s--exact\b"]}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "tdd"], env)
+        self.assertTrue(_asked(_gate("csop-gate-tdd.py", _run("cargo test"), env)))
+        self.assertTrue(_asked(_gate("csop-gate-tdd.py", _run("make test"), env)))
+        self.assertFalse(_asked(_gate("csop-gate-tdd.py", _run("cargo test foo"), env)))
+        self.assertFalse(_asked(_gate("csop-gate-tdd.py", _run("cargo test --exact"), env)))
+        # the bad regex is dropped, and the drop is reported on a non-test command
+        cp = _gate("csop-gate-tdd.py", _bash("ls"), env)
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("bad[", cp.stdout.decode() + cp.stderr.decode())
+
+    def test_tdd_subclass_reads_parent_config(self):
+        proj = _project({"tdd": {"example": "cd tests && pytest <file> -q",
+                                 "action": "deny"}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "py-tdd"], env)
+        cp = _gate("csop-gate-tdd.py", _run("pytest"), env)
+        self.assertTrue(_denied(cp))
+        self.assertIn("cd tests && pytest <file> -q", cp.stdout.decode())
+
+    def test_tdd_suggests_tests_for_last_src_edit(self):
+        proj = _project({"tdd": {"src_globs": ["hooks/**"]}})
+        os.makedirs(os.path.join(proj, "tests"), exist_ok=True)
+        _write(os.path.join(proj, "tests", "test_gate.py"), "def test(): pass\n")
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "py-tdd"], env)
+        ev = _edit(path=os.path.join(proj, "hooks", "gate.py"))
+        self.assertEqual(_gate("csop-report-tdd.py", ev, env).returncode, 0)
+        cp = _gate("csop-gate-tdd.py", _run("pytest"), env)
+        self.assertTrue(_asked(cp))
+        self.assertIn("tests/test_gate.py", cp.stdout.decode())
+
+    def test_tdd_reporter_names_the_run(self):
+        env = _env(); _cli(["enable", "py-tdd"], env)
+        cmd = "pytest tests/test_x.py -q"
+        self.assertEqual(_gate("csop-gate-tdd.py", _run(cmd), env).returncode, 0)
+        post = dict(_run(cmd), tool_response={"stdout": "..\n2 passed in 0.1s\n"})
+        self.assertEqual(_gate("csop-report-tdd.py", post, env).returncode, 0)
+        stop = {"hook_event_name": "Stop", "stop_hook_active": True}
+        ml = _gate("csop-modeline.py", stop, env).stdout.decode()
+        self.assertIn("tests ran (narrow)", ml)
+        self.assertIn("2 passed", ml)
+        # a run the gate never saw is not reported
+        self.assertEqual(_gate("csop-report-tdd.py", post, env).returncode, 0)
+        ml = _gate("csop-modeline.py", stop, env).stdout.decode()
+        self.assertNotIn("tests ran", ml)
+
+    def test_tdd_escape_hatch_covers_family(self):
+        env = _env(CSOP_TDD="off"); _cli(["enable", "py-tdd"], env)
+        cp = _gate("csop-gate-tdd.py", _bash("pytest"), env)
+        self.assertEqual(cp.returncode, 0); self.assertFalse(_asked(cp))
+
 
 class StageChecks(unittest.TestCase):
     def _proj(self):
@@ -1039,7 +1163,7 @@ class StageChecks(unittest.TestCase):
         _cli(["stage", "spike"], env)
         out = _cli(["promote"], env).stdout.decode()
         self.assertIn("promoted: spike -> core", out)
-        self.assertIn("failing test first", out)          # tdd nudge, freshly activated by core
+        self.assertIn("no hypothesis, no test run", out)  # tdd nudge, freshly activated by core
         # a stage that activates nothing emits only the transition line
         proj2 = _project({"stages": {
             "spike": {"default_stage": True, "globs": ["scratch/**"]},
@@ -1167,10 +1291,11 @@ class StageChecks(unittest.TestCase):
         _cli(["stage", "demo"], env)
         # nudge (pre-turn) reflects the effective set: tdd on appears, hyg off is gone
         out = _gate("csop-nudge.py", {}, env).stdout.decode()
-        self.assertIn("Test-Driven", out)          # stage `on` gateless discipline is nudged
+        self.assertIn("Testing Discipline", out)   # stage `on` discipline is nudged
         self.assertNotIn("Generative Hygiene", out)  # stage `off` discipline is not
-        # modeline Disciplines list agrees
-        ml = _gate("csop-modeline.py", {"hook_event_name": "Stop"}, env).stdout.decode()
+        # modeline Disciplines list agrees (second pass, after the reminder handback)
+        ml = _gate("csop-modeline.py", {"hook_event_name": "Stop",
+                                        "stop_hook_active": True}, env).stdout.decode()
         self.assertIn("tdd", ml)
         self.assertNotIn("hyg", ml)
 
