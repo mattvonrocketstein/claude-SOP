@@ -103,7 +103,10 @@ class IsoTree(Discipline):
                 "to core -- don't edit core in place for exploratory work. Use a "
                 "fresh tree per task -- never reuse an existing tree (its state is "
                 "unknown: stale or WIP); begin a new task with `git worktree add "
-                "{home}<new> <clean-base>`.")
+                "{home}<new> <clean-base>`. A fresh worktree has no submodules "
+                "and `git submodule` is not a read: copy any the tree needs "
+                "straight in with `cp -a <core>/<sub> {home}<new>/<sub>` instead "
+                "of asking the human for a git write.")
     reminder = ("IsolatedTree follow-up: if an experiment proved out, port the "
                 "clean diff back to core by edits and tear down the tree under "
                 "`{home}`; if it failed, discard the tree. Don't leave iso-trees "
@@ -113,7 +116,9 @@ class IsoTree(Discipline):
                   "must be prototyped in an isolated git worktree (an 'iso-tree') "
                   "under the crash-safe, in-repo, gitignored `home` (default "
                   "scratch/iso/), never /tmp. Prove against tests there, then "
-                  "port the diff back to core. Enforced: worktree-add must target "
+                  "port the diff back to core. Submodules a tree needs are copied "
+                  "in from core with `cp -a`, not initialized through git. "
+                  "Enforced: worktree-add must target "
                   "the iso dir, and the first write into a tree not created fresh "
                   "by this session is blocked (no reusing stale/WIP trees).")
 
@@ -533,6 +538,29 @@ class Consensus(Discipline):
                    "nudge-led.")
 
 
+class Epistemics(Discipline):
+    codename = "epi"
+    name = "Epistemics"
+    default_enabled = False
+    action = "nudge"
+    nudge = ("Epistemics active: show the cost and show the receipts. Any work "
+                "you dispatch or report as in progress carries an expected eta "
+                "(wall-clock, or step count for a plan) and says what would make "
+                "it run long. Any claim about this codebase cites the "
+                "touch-points it rests on as `path:line`; a claim about external "
+                "behavior cites the command, output, or url. Retrieve before you "
+                "assert: read the file and quote the line rather than recalling "
+                "it. An uncited claim is a guess, so label it one.")
+    overridable = ("default_enabled", "action", "nudge")
+    description = ("Citations and estimates on assertions: dispatched or "
+                   "in-progress work carries an expected eta, and a claim carries "
+                   "the resources it rests on (`path:line` for code, a command or "
+                   "url for external behavior), retrieval-augmented rather than "
+                   "recalled. Uncited claims are labeled as guesses. Complements "
+                   "Consensus (which corroborates a claim) by making the sources "
+                   "visible in the answer. Pure nudge, no gate.")
+
+
 class Groomer(Discipline):
     codename = "groom"
     name = "Groomer"
@@ -756,7 +784,7 @@ class Filetypes(Discipline):
 DISCIPLINES = [IsoTree, HumanAccountability, RobotAccountability, Scratch,
                Promotion, GenerativeHygiene, FrozenFeatures, TestingDiscipline,
                PythonTesting, FeatureSpike, Performance, TacticalRetreat, Scientist,
-               Stepwise, Consensus, Groomer, Toolsmith, TechnicalWriter,
+               Stepwise, Consensus, Epistemics, Groomer, Toolsmith, TechnicalWriter,
                EntrypointsSandbox, Filetypes, Idiomatic,
                MemoryAccountability]
 

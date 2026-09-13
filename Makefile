@@ -31,7 +31,7 @@ RESET :=
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help init install test validate ci check clean version-check update.siblings
+.PHONY: help init install test validate ci check clean commands version-check update.siblings
 
 # Where `update.siblings` looks for consumer projects; override on the CLI.
 SIBLING_ROOT ?= $(HOME)/code
@@ -62,6 +62,8 @@ init: version-check ## Enable CSOP in this repo (self-host)
 	@if [ -f .claude/csop.json ]; then $(PY) -c "import sys;sys.path.insert(0,'hooks');import csop;csop.loads_jsonc(open('.claude/csop.json').read())" \
 	  && echo "$(GREEN)validated:$(RESET) project config (json5)"; fi
 	@for f in hooks/*.py; do $(PY) -c "import ast;ast.parse(open('$$f').read())" || exit 1; done; echo "$(GREEN)validated:$(RESET) hooks parse"
+	@$(PY) tools/gen_commands.py commands --check >/dev/null \
+	  && echo "$(GREEN)validated:$(RESET) prose commands match hooks/nags.py"
 	@$(PY) tools/sync_commands.py commands .claude/commands .
 	@echo "$(GREEN)materialized$(RESET) project commands -> .claude/commands/ (CLAUDE_PROJECT_DIR-anchored; needs Claude Code v2.1.196+)"
 	@echo ""
@@ -85,6 +87,10 @@ install: version-check ## Wire CSOP into a consumer project (run from a submodul
 	 printf '%s\n' "$$cmdlog"; \
 	 printf '  %-24s %s\n' ".gitignore" "$$gi_st"; \
 	 printf '\nActive on your next Claude Code session here. hacc, scratch, hyg are on by default; %s adds more.\n' "$(CYAN)/sop enable <name>$(RESET)"
+
+commands: ## Regenerate the prose slash commands in commands/ from hooks/nags.py
+	@$(PY) tools/gen_commands.py commands
+	@echo "$(GREEN)generated$(RESET) prose commands <- hooks/nags.py (aliases point at one text)"
 
 test: ## Run the offline test suite (tests/test_csop.py)
 	@$(PY) -m unittest -v tests.test_csop

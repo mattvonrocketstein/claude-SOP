@@ -21,6 +21,8 @@ sys.path.insert(0, HOOKS)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import csop            # noqa: E402
 import disciplines     # noqa: E402
+import gen_commands    # noqa: E402
+import nags            # noqa: E402
 import sync_commands   # noqa: E402
 
 EM_DASH = chr(8212)
@@ -364,6 +366,18 @@ class GateChecks(unittest.TestCase):
         cmd = "git -C scratch/iso/mk log && git " + "reset --hard"
         self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)))
         self.assertTrue(_denied(_gate("csop-gate-git.py", _bash("git $CMD"), env)))
+
+    def test_hacc_ignores_non_invocations(self):
+        env = _env(); _cli(["enable", "hacc"], env)
+        for cmd in ("cat hooks/csop-gate-" + "git.py",
+                    "grep -n 'gate-" + "git' tests/test_csop.py",
+                    "ls ." + "git/refs",
+                    "find . -name '*." + "git*'"):
+            self.assertFalse(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+        for cmd in ("ls && git " + "commit -m x",
+                    "(git " + "reset --hard)",
+                    "xargs git " + "checkout"):
+            self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
 
     def test_hacc_worktree_reads_only(self):
         env = _env(); _cli(["enable", "hacc"], env)
@@ -1034,6 +1048,8 @@ class GateChecks(unittest.TestCase):
                     "pytest -k foo", "pytest --lf", "pytest tests/unit",
                     "python -m pytest tests/test_x.py", "pytest -m callform -q",
                     "cd tests && ../.venv/bin/pytest test_x.py -q",
+                    "cd tests && ./.tox/unit/bin/python -m pytest test_dotted_cmk.py",
+                    "pytest tests/test_x.py; echo done", "FOO=1 pytest tests/test_x.py",
                     "pytest --deselect tests/test_x.py::t tests/test_y.py"):
             cp = _gate("csop-gate-tdd.py", _run(cmd), env)
             self.assertEqual(cp.returncode, 0, cmd); self.assertFalse(_asked(cp), cmd)
@@ -1041,7 +1057,8 @@ class GateChecks(unittest.TestCase):
     def test_tdd_non_test_command_ignored(self):
         env = _env(); _cli(["enable", "py-tdd"], env)
         for cmd in ("ls tests/", "grep -rn pytest docs/", "cat pytest.ini",
-                    "echo pytest && ls"):
+                    "echo pytest && ls", "echo 'cd tests && pytest x.py' > note",
+                    "printf '%s' '{\"command\":\"python -m pytest\"}' | python3 hook.py"):
             cp = _gate("csop-gate-tdd.py", _bash(cmd), env)
             self.assertEqual(cp.returncode, 0, cmd); self.assertFalse(_asked(cp), cmd)
 
@@ -1499,6 +1516,56 @@ class SyncCommandsChecks(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(cmds, "sop.md")), out)
         self.assertIn("discipline.md", out)   # the removal is logged for the human
         self.assertIn("deploy.md", out)       # so is the file left alone
+
+
+class NagChecks(unittest.TestCase):
+    """One text per nag: an alias is a pointer to it, never a second copy."""
+
+    def test_checked_in_commands_match_the_table(self):
+        log, stale = gen_commands.generate(os.path.join(ROOT, "commands"), check=True)
+        self.assertEqual(stale, 0, "run `make commands`:\n" + "\n".join(log))
+
+    def test_every_name_and_alias_has_a_command_file(self):
+        for stem, _nag, _alias in nags.commands():
+            self.assertTrue(os.path.isfile(
+                os.path.join(ROOT, "commands", stem + ".md")), stem)
+
+    def test_an_alias_prints_the_canonical_text(self):
+        env = _env()
+        canon = _cli(["nag", "offtopic"], env).stdout.decode()
+        self.assertIn("Derailment", canon)
+        self.assertEqual(_cli(["nag", "focus"], env).stdout.decode(), canon)
+        self.assertEqual(_cli(["nag", "yap"], env).stdout.decode(),
+                         _cli(["nag", "unclear"], env).stdout.decode())
+        bad = _cli(["nag", "nope"], env)
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("unknown nag", bad.stderr.decode())
+
+    def test_a_nag_command_reaches_the_model(self):
+        """Unlike the read-only verbs, a nag must not be answered by the prompt
+        hook: blocking the prompt is exactly what would keep the model from
+        seeing the instruction."""
+        cp = _gate("csop-command.py", {"hook_event_name": "UserPromptSubmit",
+                                       "prompt": "<command-name>/offtopic</command-name>"},
+                   _env())
+        self.assertEqual(cp.stdout.decode(), "")
+
+    def test_a_retired_nag_command_is_removed_and_a_real_one_is_kept(self):
+        d = tempfile.mkdtemp()
+        retired = os.path.join(d, "nitpick.md")
+        _write(retired, gen_commands.render(nags.Unsat, False))
+        theirs = os.path.join(d, "sop.md")
+        _write(theirs, _CMD % "")
+        gen_commands.generate(d)
+        self.assertFalse(os.path.exists(retired))
+        self.assertTrue(os.path.isfile(theirs))
+        self.assertTrue(os.path.isfile(os.path.join(d, "offtopic.md")))
+
+    def test_a_generated_command_is_prunable_downstream(self):
+        """The old prose files were invisible to sync_commands, so a consumer
+        kept a command CSOP had retired."""
+        with open(os.path.join(ROOT, "commands", "focus.md")) as f:
+            self.assertTrue(sync_commands.is_ours(f.read()))
 
 
 if __name__ == "__main__":

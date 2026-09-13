@@ -63,24 +63,35 @@ def listed(members, key):
     return out
 
 
-def _segments(cmd):
-    return [s for s in re.split(r"\s*(?:&&|\|\||[;|])\s*", cmd) if s.strip()]
-
-
+_OPERATORS = ("&&", "||", ";", "|", "&")
 _WRAPPERS = ("time", "sudo", "nice", "env", "exec", "nohup", "xvfb-run")
 _REDIRECT = re.compile(r"^(?:\d*[<>]{1,2}|&>)")
 
 
-def _tokens(seg):
+def _segments(cmd):
+    """Quote-aware command segments, each a token list, split on shell operators."""
     try:
-        return shlex.split(seg)
+        toks = shlex.split(cmd)
     except ValueError:
-        return seg.split()
+        toks = cmd.split()
+    out, cur = [], []
+    for t in toks:
+        if t in _OPERATORS:
+            out.append(cur)
+            cur = []
+        elif t.endswith(";") and len(t) > 1:
+            cur.append(t[:-1])
+            out.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    out.append(cur)
+    return [s for s in out if s]
 
 
-def _lead(seg):
+def _lead(toks):
     """The segment with leading env assignments and wrapper commands stripped."""
-    toks = _tokens(seg)
+    toks = list(toks)
     while toks and (re.match(r"^\w+=", toks[0]) or toks[0] in _WRAPPERS):
         toks.pop(0)
     if len(toks) > 1 and toks[0] == "timeout":
@@ -152,7 +163,7 @@ def classify(cmd, members, bad=None):
     for seg in _segments(cmd):
         toks = _lead(seg)
         if _runs(toks, runners):
-            return _scope(toks, members, runners, narrows), seg
+            return _scope(toks, members, runners, narrows), " ".join(seg)
     return None, ""
 
 

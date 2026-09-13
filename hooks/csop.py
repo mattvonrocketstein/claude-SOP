@@ -687,6 +687,7 @@ _USAGE = """csop.py <command>
   list                     the active disciplines (the no-argument default)
   catalog                  every discipline, one line each
   show <name|codename>     one discipline in full
+  nag <name|alias>         the text of a prose command (what /offtopic says)
   stage [<name>]           show the current stage, or make <name> current
   promote [<name>]         move to a successor stage along the `from` graph
   demote [<name>]          move back to a source stage
@@ -842,6 +843,14 @@ def _cli(argv):
         print("demoted: {0} -> {1}".format(cur, preds[0]))
         for ln in _new_nudges(before):
             print(ln)
+        return 0
+    if argv[:1] == ["nag"] and len(argv) >= 2:
+        import nags
+        n = nags.by_name(argv[1])
+        if not n:
+            print("unknown nag: " + argv[1], file=sys.stderr)
+            return 2
+        print(n.text)
         return 0
     if argv[:1] == ["list"]:
         print("active: " + " ".join(sorted(active())))

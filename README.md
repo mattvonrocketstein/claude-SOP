@@ -56,6 +56,9 @@ The application route must hook into the stop message, and so it looks like this
 
 <img src="docs/img/csop-modeline-app.png" alt="CSOP modeline showing active stage and disciplines">
 
+Recent desktop builds collapse that message into a "Claude Code notice" widget, so
+the box is one click away rather than on screen.
+
 The CLI application has more native support, so it looks like this:
 
 <img src="docs/img/csop-modeline-cli.png" alt="CSOP modeline in the CLI">
@@ -89,6 +92,7 @@ List below is incomplete!  Lots of in-flight WIP and experiments are in the repo
 | **Tactical Retreat** | `tactical` | opt-in | [code](hooks/disciplines.py) | When a change/experiment is going badly, cleanly retreat to a known-good state and rethink instead of accumulating hacks or churning flip/revert/flip. |
 | **Stepwise** | `step` | opt-in | [code](hooks/disciplines.py) | Small-increment method. |
 | **Consensus** | `consensus` | opt-in | [code](hooks/disciplines.py) | Corroboration / multi-perspective method. |
+| **Epistemics** | `epi` | opt-in | [code](hooks/disciplines.py) | Etas on dispatched work, rag-style citations (`path:line`, command, url) on claims. |
 | **Groomer** | `groom` | opt-in | [code](hooks/disciplines.py) | Behavior-preserving style sweeps (conflicts with iso). |
 | **[Technical Writer](#technical-writer)** | `techwrite` | opt-in | [code](hooks/csop-gate-techwrite.py) | Clear technical writing. |
 
@@ -112,7 +116,15 @@ git submodule add \
 && make -C .claude/csop install
 ```
 
-This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and creates the `/sop`, `/disc`, `/discipline`, `/stage`, `/promote`, `/demote`, and `/sop-disable` commands. The merge syncs rather than appends, so re-running it after an upgrade is safe. Then start a Claude Code session in the project and approve workspace trust once. (Install already appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`.)
+This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and creates the `/sop`, `/disc`, `/discipline`, `/stage`, `/promote`, `/demote`, `/sop-disable`, `/offtopic`, `/focus`, `/unclear`, `/yap`, and `/unsat` commands. The merge syncs rather than appends, so re-running it after an upgrade is safe. Then start a Claude Code session in the project and approve workspace trust once. (Install already appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`.)
+
+| Command | Alias | Says |
+| --- | --- | --- |
+| `/offtopic` | `/focus` | You lost the thread. Restate the mission, then return to it. |
+| `/unclear` | `/yap` | Too much fluff. Restate against the mission with relevant facts only. |
+| `/unsat` | | The turn failed its basic goal. Review recent turns, then complete the task. |
+
+These three are prose, not machinery: each is a fixed instruction aimed at the model. Their text lives once in [`nags.py`](hooks/nags.py), and `make commands` renders one command file per name and per alias from it. A command file carries no prose of its own, only a call to `csop.py nag <name>`, so an alias is a pointer rather than a copy that can drift. Add a nag, or an alias, by editing the table and re-running the target; the test suite fails on a checkout where the two disagree.
 
 The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
 
@@ -164,6 +176,7 @@ so a failed experiment never touches core.
 - **Rebase onto core before promoting** (`git -C scratch/iso/<name> rebase <core>`), so the diff reconciles against current core.
 - **Promote by edits**: hand-apply the proven diff into core files, never a git merge.
 - **Discard the tree** once the diff has landed.
+- **Submodules**: a fresh worktree has none, and `git submodule` is a write under Human Accountability. Copy what the tree needs from core instead: `cp -a <core>/<sub> scratch/iso/<name>/<sub>`. No human git write required.
 
 **Enforced restrictions**
 
@@ -469,12 +482,21 @@ That hands the turn back to the model so a reminder can be acted on rather than
 merely displayed. The box prints on the return pass, which carries
 `stop_hook_active`, so it appears once per turn and the handback happens once.
 
+Each surface renders `systemMessage` its own way and the hook cannot influence it.
+The CLI prints the box inline. Recent desktop builds put it in a default-collapsed
+widget labelled "Claude Code notice", so it is one click away instead of on screen.
+
 ### Status line (opt-in, CLI only)
 
 `csop-statusline.py` renders a one-line summary through Claude Code's
 `statusLine` setting instead of a `Stop` hook, so it gets real ANSI color and a
 real terminal width. It is CLI-only, and additive rather than a replacement:
 `csop-modeline.py` stays wired for every surface.
+
+The desktop app, the VS Code panel, and the web client all ignore the `statusLine`
+setting. That is tracked upstream in
+[anthropics/claude-code#41456](https://github.com/anthropics/claude-code/issues/41456);
+if it lands, the two renderers can converge on this one.
 
 ```
 ⬥ CSOP :: Disciplines: hacc,hyg,racc,scratch  Stages: spike,[core],ship

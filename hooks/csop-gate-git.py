@@ -18,7 +18,10 @@ import disciplines  # noqa: E402
 _HACC = disciplines.HumanAccountability
 DISCIPLINE = _HACC.codename                              # "hacc"
 
-_GIT = re.compile(r"\bgit\b")
+# only a git in command position counts, not one inside a path or quoted word.
+_GIT = re.compile(r"(?:^|[;|&(){}`\n])\s*(?:\w+=\S+\s+)*"
+                  r"(?:(?:sudo|env|time|command|nohup|xargs|then|do|else)\s+)*"
+                  r"git\b")
 # read subcommands come from the discipline's project-overridable read_list.
 _READ = set(_HACC.get("read_list"))
 
