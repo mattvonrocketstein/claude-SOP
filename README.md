@@ -116,7 +116,7 @@ git submodule add \
 && make -C .claude/csop install
 ```
 
-This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and creates the `/sop`, `/disc`, `/discipline`, `/stage`, `/promote`, `/demote`, `/sop-disable`, `/offtopic`, `/focus`, `/unclear`, `/yap`, and `/unsat` commands. The merge syncs rather than appends, so re-running it after an upgrade is safe. Then start a Claude Code session in the project and approve workspace trust once. (Install already appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`.)
+This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and creates the `/sop`, `/disc`, `/discipline`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`, `/offtopic`, `/focus`, `/unclear`, `/yap`, and `/unsat` commands. The merge syncs rather than appends, so re-running it after an upgrade is safe. Then start a Claude Code session in the project and approve workspace trust once. (Install already appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`.)
 
 | Command | Alias | Says |
 | --- | --- | --- |
@@ -124,7 +124,9 @@ This merges CSOP's hooks and the `/sop` permission entries into the project's `.
 | `/unclear` | `/yap` | Too much fluff. Restate against the mission with relevant facts only. |
 | `/unsat` | | The turn failed its basic goal. Review recent turns, then complete the task. |
 
-These three are prose, not machinery: each is a fixed instruction aimed at the model. Their text lives once in [`nags.py`](hooks/nags.py), and `make commands` renders one command file per name and per alias from it. A command file carries no prose of its own, only a call to `csop.py nag <name>`, so an alias is a pointer rather than a copy that can drift. Add a nag, or an alias, by editing the table and re-running the target; the test suite fails on a checkout where the two disagree.
+These three are prose, not machinery: each is a fixed instruction aimed at the model, and its text lives once in [`nags.py`](hooks/nags.py).
+
+Every CSOP slash command is generated, not hand-written. Two tables define them: [`nags.py`](hooks/nags.py) for the prose commands above, and [`forwards.py`](hooks/forwards.py) for the ones that hand a verb to the CLI (`/sop`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`). `make commands` renders one file per name and per alias, so `/focus` and `/disc` are pointers to a table entry rather than copies that drift from it. Add a command or an alias by editing the table and re-running the target. `make init` and the test suite both fail on a checkout where the files and the tables disagree.
 
 The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
 

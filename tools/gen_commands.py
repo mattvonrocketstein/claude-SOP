@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Render the prose slash commands in commands/ from the nags table.
+"""Render the slash commands in commands/ from the tables that define them.
 
-Every nag name and alias gets one file, and each embeds the canonical text at run
-time rather than copying it. Only these files are managed: one that invokes
-`csop.py nag` but answers to no name in the table is removed, anything else is
-left alone. Usage: gen_commands.py <commands-dir> [--check]
+A nag carries prose (hooks/nags.py); a forward hands a verb to the CLI
+(hooks/forwards.py). Every name and alias in either table gets one file, and no
+file carries an identity of its own, so an alias cannot drift from its canonical.
+A command file invoking the CLI but named by neither table is removed, anything
+else is left alone. Usage: gen_commands.py <commands-dir> [--check]
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "hooks"))
+import forwards  # noqa: E402
 import nags  # noqa: E402
 
 CLI = '"${CLAUDE_PLUGIN_ROOT}/hooks/csop.py"'
-MARKER = "csop.py\" nag "
-COMMAND_TEMPLATE = "\n".join((
+MARKER = "hooks/csop.py"
+NAG_TEMPLATE = "\n".join((
     "---",
     "description: CSOP -- {description}",
     "allowed-tools: Bash(python3 {cli} *)",
@@ -25,12 +27,37 @@ COMMAND_TEMPLATE = "\n".join((
     "",
     "Comply with the instruction above.",
     ""))
+FORWARD_TEMPLATE = "\n".join((
+    "---",
+    "description: CSOP -- {description}",
+    "argument-hint: \"{hint}\"",
+    "allowed-tools: Bash(python3 {cli} *)",
+    "disable-model-invocation: true",
+    "---",
+    "!`python3 {cli} {argv}`",
+    "",
+    "Show the output above verbatim. No commentary.",
+    ""))
 
 
-def render(nag, is_alias):
-    desc = ("alias for /{0}. {1}".format(nag.name, nag.summary[0].upper() + nag.summary[1:])
-            if is_alias else nag.summary)
-    return COMMAND_TEMPLATE.format(description=desc, cli=CLI, name=nag.name)
+def _describe(entry, is_alias):
+    if not is_alias:
+        return entry.summary
+    return "alias for /{0}. {1}".format(
+        entry.name, entry.summary[0].upper() + entry.summary[1:])
+
+
+def render(entry, is_alias):
+    """The full text of the command file for a table entry under one of its names."""
+    desc = _describe(entry, is_alias)
+    if hasattr(entry, "text"):
+        return NAG_TEMPLATE.format(description=desc, cli=CLI, name=entry.name)
+    argv = ((entry.verb + " ") if entry.verb else "") + "$ARGUMENTS"
+    return FORWARD_TEMPLATE.format(description=desc, cli=CLI, hint=entry.hint, argv=argv)
+
+
+def _table():
+    return nags.commands() + forwards.commands()
 
 
 def _read(path):
@@ -44,7 +71,7 @@ def _read(path):
 def generate(dest, check=False):
     """Write (or, with check, only report) the managed files. Returns the log
     lines and the count of files that are not already correct."""
-    wanted = {stem: render(nag, alias) for stem, nag, alias in nags.commands()}
+    wanted = {stem: render(entry, alias) for stem, entry, alias in _table()}
     log, stale = [], 0
     for stem in sorted(wanted):
         path = os.path.join(dest, stem + ".md")

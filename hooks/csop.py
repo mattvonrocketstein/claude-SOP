@@ -228,12 +228,36 @@ def project_config():
 
 # ---- stages (session-level current stage + per-stage policy) ---------------
 
+def ticket_config():
+    """The top-level `ticket` block: the stage template a declared ticket
+    instantiates (disciplines, pre, post). {} if absent or malformed."""
+    cfg = project_config().get("ticket")
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def stages_config():
     """The top-level `stages` block from .claude/csop.json (a reserved key, not a
     codename): {name: {globs, from, disciplines, pre, post, default_stage}}. {} if
-    absent or malformed."""
+    absent or malformed. A declared ticket appears here as a synthesized node so
+    every caller sees it, the stage roster and the from-graph included."""
     cfg = project_config().get("stages")
-    return cfg if isinstance(cfg, dict) else {}
+    cfg = dict(cfg) if isinstance(cfg, dict) else {}
+    tkt = current_ticket()
+    if tkt and tkt.get("id") and tkt["id"] not in cfg:
+        cfg[tkt["id"]] = _ticket_node(tkt)
+    return cfg
+
+
+def _ticket_node(tkt):
+    """The synthesized stage for a declared ticket: the project's ticket template,
+    rooted at the stage the ticket displaced. It owns no globs, so it never claims
+    a path and its writable set comes entirely from that ancestor."""
+    node = dict(ticket_config())
+    node.pop("default_stage", None)
+    node.pop("globs", None)
+    node.pop("writable", None)
+    node["from"] = [tkt["under"]] if tkt.get("under") else []
+    return node
 
 
 def _stage_path():
@@ -272,6 +296,44 @@ def set_stage(name):
     with open(_stage_path(), "w") as f:
         json.dump(st, f)
     return name
+
+
+def current_ticket():
+    """The declared ticket as {id, under}, or None. Session-scoped: it lives in
+    the stage state, so the SessionStart reseed drops it, which is the intent.
+    A ticket says the session is concerned with an issue, never that a tracker
+    calls it open."""
+    tkt = _stage_state().get("ticket")
+    return tkt if isinstance(tkt, dict) and tkt.get("id") else None
+
+
+def set_ticket(tid):
+    """Declare `tid`, rooting its synthesized stage at whatever stage is current,
+    and make it current. Returns the displaced stage name."""
+    under = current_stage()
+    st = _stage_state()
+    st["ticket"] = {"id": tid, "under": under}
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_stage_path(), "w") as f:
+        json.dump(st, f)
+    set_stage(tid)
+    return under
+
+
+def clear_ticket():
+    """Close the declared ticket and restore the stage it displaced. Returns
+    (id, restored-stage), or None when no ticket is declared."""
+    tkt = current_ticket()
+    if not tkt:
+        return None
+    st = _stage_state()
+    st.pop("ticket", None)
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_stage_path(), "w") as f:
+        json.dump(st, f)
+    under = tkt.get("under")
+    set_stage(under)
+    return (tkt["id"], under)
 
 
 def stage_pre_fired(name):
@@ -339,12 +401,23 @@ def _match_globs(path, globs):
     return False
 
 
-def _stage_ancestors(name, cfg, seen):
-    for src in (cfg.get(name, {}) or {}).get("from", []) or []:
-        if src not in seen:
-            seen.add(src)
-            _stage_ancestors(src, cfg, seen)
-    return seen
+def _stage_lineage(name, cfg):
+    """`name` followed by its transitive `from` ancestors, nearest first. The walk
+    is breadth-first and keeps each node's `from` order within a level, so the
+    sequence is a stable nearest-to-farthest ranking. Distance is what lets
+    stage_discipline resolve a codename two stages declare; writable_globs unions
+    the whole lineage and ignores the order."""
+    out, seen, frontier = [], {name}, [name]
+    while frontier:
+        nxt = []
+        for n in frontier:
+            out.append(n)
+            for src in (cfg.get(n, {}) or {}).get("from", []) or []:
+                if src not in seen:
+                    seen.add(src)
+                    nxt.append(src)
+        frontier = nxt
+    return out
 
 
 def writable_globs(name):
@@ -356,7 +429,7 @@ def writable_globs(name):
     if isinstance(st.get("writable"), list):
         return list(st["writable"])
     out = []
-    for n in {name} | _stage_ancestors(name, cfg, set()):
+    for n in _stage_lineage(name, cfg):
         out += (cfg.get(n, {}) or {}).get("globs", []) or []
     return out
 
@@ -460,18 +533,11 @@ def gist(text, limit=120):
 _STAGE_DISABLE = ("false", "no", "disabled", "off")
 
 
-def stage_discipline(codename):
-    """The current stage's directive for `codename`: None (not mentioned), False
-    (disable), or an overrides dict (enable, possibly empty). A dict enables and
-    supplies per-stage config to merge; `true` or a non-disable string enables with
-    no changes; `false`/`no`/`disabled`/`off`/`0` disable."""
-    cs = current_stage()
-    if not cs:
-        return None
-    disc = (stages_config().get(cs) or {}).get("disciplines", {}) or {}
-    if codename not in disc:
-        return None
-    val = disc[codename]
+def _stage_directive(val):
+    """One `disciplines` entry as a directive: False (disable), or an overrides
+    dict (enable, possibly empty). A dict enables and supplies per-stage config to
+    merge; `true` or a non-disable string enables with no changes;
+    `false`/`no`/`disabled`/`off`/`0` disable."""
     if isinstance(val, dict):
         return val
     if val is True:
@@ -479,6 +545,22 @@ def stage_discipline(codename):
     if isinstance(val, str) and val.strip().lower() not in _STAGE_DISABLE:
         return {}
     return False
+
+
+def stage_discipline(codename):
+    """The current stage's directive for `codename`, or None when neither it nor
+    its `from` ancestors mention it. Resolution is nearest-wins along the lineage,
+    so a stage overrides what it inherits and its disable beats an ancestor's
+    enable. Policy inherits the way writable_globs already inherits globs."""
+    cs = current_stage()
+    if not cs:
+        return None
+    cfg = stages_config()
+    for name in _stage_lineage(cs, cfg):
+        disc = (cfg.get(name) or {}).get("disciplines", {}) or {}
+        if codename in disc:
+            return _stage_directive(disc[codename])
+    return None
 
 
 def effective_active():
@@ -490,7 +572,9 @@ def effective_active():
     base = set(active())
     cs = current_stage()
     if cs:
-        for name in (stages_config().get(cs) or {}).get("disciplines", {}) or {}:
+        cfg = stages_config()
+        for name in {c for n in _stage_lineage(cs, cfg)
+                     for c in (cfg.get(n) or {}).get("disciplines", {}) or {}}:
             d = stage_discipline(name)
             if d is False:
                 base.discard(name)
@@ -689,6 +773,8 @@ _USAGE = """csop.py <command>
   show <name|codename>     one discipline in full
   nag <name|alias>         the text of a prose command (what /offtopic says)
   stage [<name>]           show the current stage, or make <name> current
+  ticket [<id>]            show the declared ticket, or declare <id> over the
+                           current stage (promote closes it, demote drops it)
   promote [<name>]         move to a successor stage along the `from` graph
   demote [<name>]          move back to a source stage
   help                     this text
@@ -782,11 +868,40 @@ def _cli(argv):
         print("stage: " + (current_stage() or "(none)"))
         print("available: " + (", ".join(names) if names else "(none defined)"))
         return 0
+    if argv[:1] == ["ticket"]:
+        if len(argv) >= 2 and not argv[1].startswith("-"):
+            tid = argv[1]
+            if tid in (project_config().get("stages") or {}):
+                print("ticket id collides with a configured stage: " + tid,
+                      file=sys.stderr)
+                return 2
+            cur = current_ticket()
+            if cur:
+                print("already on ticket {0}; close it first with `csop.py promote`".format(
+                    cur["id"]), file=sys.stderr)
+                return 2
+            before = effective_active()
+            under = set_ticket(tid)
+            print("ticket: {0} (over {1})".format(tid, under or "(no stage)"))
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
+        tkt = current_ticket()
+        print("ticket: " + (tkt["id"] if tkt else "(none)"))
+        return 0
     if argv[:1] == ["promote"]:
         cur = current_stage()
         if not cur:
             print("no current stage; set one with `csop.py stage <name>`", file=sys.stderr)
             return 2
+        tkt = current_ticket()
+        if tkt and tkt["id"] == cur:
+            before = effective_active()
+            tid, back = clear_ticket()
+            print("closed {0} as resolved; stage: {1}".format(tid, back or "(none)"))
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
         succ = stage_successors(cur)
         if len(argv) >= 2 and not argv[1].startswith("-"):
             target = argv[1]
@@ -818,6 +933,14 @@ def _cli(argv):
         if not cur:
             print("no current stage; set one with `csop.py stage <name>`", file=sys.stderr)
             return 2
+        tkt = current_ticket()
+        if tkt and tkt["id"] == cur:
+            before = effective_active()
+            tid, back = clear_ticket()
+            print("closed {0} as won't fix; stage: {1}".format(tid, back or "(none)"))
+            for ln in _new_nudges(before):
+                print(ln)
+            return 0
         preds = (stages_config().get(cur) or {}).get("from") or []
         if len(argv) >= 2 and not argv[1].startswith("-"):
             target = argv[1]

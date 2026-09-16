@@ -21,6 +21,7 @@ sys.path.insert(0, HOOKS)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import csop            # noqa: E402
 import disciplines     # noqa: E402
+import forwards        # noqa: E402
 import gen_commands    # noqa: E402
 import nags            # noqa: E402
 import sync_commands   # noqa: E402
@@ -1230,8 +1231,24 @@ class StageChecks(unittest.TestCase):
         bad = _edit(path="x.py", old="v = 1", new="v = 1\n# NEVER do this")
         _cli(["stage", "demo"], env)
         self.assertFalse(_denied(_gate("csop-gate-hyg.py", bad, env)))   # hyg off in demo
-        _cli(["stage", "core"], env)
-        self.assertTrue(_denied(_gate("csop-gate-hyg.py", bad, env)))    # core: session hyg applies
+
+    def test_stage_discipline_inherits_nearest(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj()); _cli(["enable", "hyg"], env)
+        bad = _edit(path="x.py", old="v = 1", new="v = 1\n# NEVER do this")
+        _cli(["stage", "core"], env)                    # core declares nothing; module nudges, demo is off
+        cp = _gate("csop-gate-hyg.py", bad, env)
+        self.assertFalse(_denied(cp))                   # module wins on distance, not demo
+        self.assertIn("additionalContext", cp.stdout.decode())
+
+    def test_stage_discipline_descendant_disable_wins(self):
+        proj = _project({"stages": {
+            "root": {"default_stage": True, "globs": ["r/**"], "disciplines": {"tdd": {}}},
+            "leaf": {"globs": ["l/**"], "from": ["root"], "disciplines": {"tdd": "off"}}}})
+        env = _env(CLAUDE_PROJECT_DIR=proj)
+        _cli(["stage", "root"], env)
+        self.assertIn("* tdd", _cli(["catalog"], env).stdout.decode())
+        _cli(["stage", "leaf"], env)
+        self.assertNotIn("* tdd", _cli(["catalog"], env).stdout.decode())
 
     def test_stage_downgrade_action(self):
         env = _env(CLAUDE_PROJECT_DIR=self._proj()); _cli(["enable", "hyg"], env)
@@ -1329,6 +1346,61 @@ class StageChecks(unittest.TestCase):
                          self._w("other/y"), env)))              # unclassified: passes
         self.assertTrue(_denied(_gate("csop-gate-promotion.py",
                         self._w("core.py"), env)))               # core file, outside writable(lab)
+
+
+class TicketChecks(unittest.TestCase):
+    def _proj(self):
+        return _project({
+            "ticket": {"disciplines": {"tdd": {}}},
+            "stages": {
+                "spike": {"default_stage": True, "globs": ["scratch/**"]},
+                "core": {"globs": ["hooks/**"], "from": ["spike"],
+                         "disciplines": {"techwrite": {}}}}})
+
+    def test_ticket_declares_over_current_stage(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj())
+        self.assertIn("(none)", _cli(["ticket"], env).stdout.decode())
+        _cli(["stage", "core"], env)
+        self.assertIn("T-1 (over core)", _cli(["ticket", "T-1"], env).stdout.decode())
+        self.assertIn("stage: T-1", _cli(["stage"], env).stdout.decode())
+
+    def test_ticket_inherits_displaced_stage(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj())
+        _cli(["stage", "core"], env); _cli(["ticket", "T-1"], env)
+        out = _cli(["catalog"], env).stdout.decode()
+        self.assertIn("* techwrite", out)            # inherited through the synthesized edge
+        self.assertIn("* tdd", out)                  # added by the ticket template
+
+    def test_ticket_owns_no_globs(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj()); _cli(["enable", "pro"], env)
+        _cli(["stage", "core"], env); _cli(["ticket", "T-1"], env)
+        w = {"tool_name": "Write", "tool_input": {"file_path": "hooks/x.py", "content": "x"}}
+        self.assertFalse(_denied(_gate("csop-gate-promotion.py", w, env)))
+
+    def test_promote_closes_resolved_and_demote_drops(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj())
+        _cli(["stage", "core"], env); _cli(["ticket", "T-1"], env)
+        self.assertIn("closed T-1 as resolved", _cli(["promote"], env).stdout.decode())
+        self.assertIn("stage: core", _cli(["stage"], env).stdout.decode())
+        self.assertIn("(none)", _cli(["ticket"], env).stdout.decode())
+        env2 = _env(CLAUDE_PROJECT_DIR=self._proj())
+        _cli(["stage", "core"], env2); _cli(["ticket", "T-2"], env2)
+        self.assertIn("won't fix", _cli(["demote"], env2).stdout.decode())
+        self.assertIn("stage: core", _cli(["stage"], env2).stdout.decode())
+
+    def test_ticket_rejects_collision_and_double_declare(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj())
+        self.assertEqual(_cli(["ticket", "core"], env).returncode, 2)
+        _cli(["ticket", "T-1"], env)
+        self.assertEqual(_cli(["ticket", "T-2"], env).returncode, 2)
+        self.assertIn("T-1", _cli(["ticket"], env).stdout.decode())
+
+    def test_ticket_drops_on_session_reset(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj())
+        _cli(["stage", "core"], env); _cli(["ticket", "T-1"], env)
+        _gate("csop-session-reset.py", {"source": "clear"}, env)
+        self.assertIn("(none)", _cli(["ticket"], env).stdout.decode())
+        self.assertIn("stage: spike", _cli(["stage"], env).stdout.decode())
 
 
 class InstallChecks(unittest.TestCase):
@@ -1504,7 +1576,7 @@ class SyncCommandsChecks(unittest.TestCase):
         client = tempfile.mkdtemp()
         cmds = os.path.join(client, ".claude", "commands")
         os.makedirs(cmds)
-        retired = os.path.join(cmds, "discipline.md")
+        retired = os.path.join(cmds, "dreamer.md")
         _write(retired, _CMD % "")
         theirs = os.path.join(cmds, "deploy.md")
         _write(theirs, "---\ndescription: theirs\n---\n!`make deploy`\n")
@@ -1514,21 +1586,40 @@ class SyncCommandsChecks(unittest.TestCase):
         self.assertFalse(os.path.exists(retired), out)
         self.assertTrue(os.path.isfile(theirs), out)
         self.assertTrue(os.path.isfile(os.path.join(cmds, "sop.md")), out)
-        self.assertIn("discipline.md", out)   # the removal is logged for the human
+        self.assertIn("dreamer.md", out)      # the removal is logged for the human
         self.assertIn("deploy.md", out)       # so is the file left alone
 
 
-class NagChecks(unittest.TestCase):
-    """One text per nag: an alias is a pointer to it, never a second copy."""
+class SlashCommandChecks(unittest.TestCase):
+    """One definition per command: an alias is a pointer, never a second copy."""
 
     def test_checked_in_commands_match_the_table(self):
         log, stale = gen_commands.generate(os.path.join(ROOT, "commands"), check=True)
         self.assertEqual(stale, 0, "run `make commands`:\n" + "\n".join(log))
 
     def test_every_name_and_alias_has_a_command_file(self):
-        for stem, _nag, _alias in nags.commands():
+        for stem, _entry, _alias in nags.commands() + forwards.commands():
             self.assertTrue(os.path.isfile(
                 os.path.join(ROOT, "commands", stem + ".md")), stem)
+
+    def test_an_alias_forwards_the_same_verb_as_its_canonical(self):
+        canon = gen_commands.render(forwards.Sop, False)
+        for alias in ("disc", "discipline"):
+            with open(os.path.join(ROOT, "commands", alias + ".md")) as f:
+                text = f.read()
+            body = text.split("---\n")[-1]
+            self.assertEqual(body, canon.split("---\n")[-1])   # same invocation
+            self.assertIn("alias for /sop", text)              # different label
+        self.assertIs(forwards.by_name("/disc"), forwards.Sop)
+
+    def test_the_prompt_hook_answers_an_alias(self):
+        """csop-command.py accepts disc and discipline, so a read-only verb is
+        answered instantly under an alias too."""
+        tag = ("<command-name>/discipline</command-name>\n"
+               "<command-args>catalog</command-args>")
+        cp = _gate("csop-command.py", {"hook_event_name": "UserPromptSubmit",
+                                       "prompt": tag}, _env())
+        self.assertIn("iso", json.loads(cp.stdout.decode())["reason"])
 
     def test_an_alias_prints_the_canonical_text(self):
         env = _env()
@@ -1550,16 +1641,17 @@ class NagChecks(unittest.TestCase):
                    _env())
         self.assertEqual(cp.stdout.decode(), "")
 
-    def test_a_retired_nag_command_is_removed_and_a_real_one_is_kept(self):
+    def test_a_retired_command_is_removed_and_a_stranger_is_kept(self):
         d = tempfile.mkdtemp()
         retired = os.path.join(d, "nitpick.md")
         _write(retired, gen_commands.render(nags.Unsat, False))
-        theirs = os.path.join(d, "sop.md")
-        _write(theirs, _CMD % "")
+        theirs = os.path.join(d, "deploy.md")
+        _write(theirs, "---\ndescription: theirs\n---\n!`make deploy`\n")
         gen_commands.generate(d)
-        self.assertFalse(os.path.exists(retired))
-        self.assertTrue(os.path.isfile(theirs))
-        self.assertTrue(os.path.isfile(os.path.join(d, "offtopic.md")))
+        self.assertFalse(os.path.exists(retired))    # names no table entry
+        self.assertTrue(os.path.isfile(theirs))      # invokes no CSOP command
+        for stem in ("offtopic.md", "sop.md", "disc.md"):
+            self.assertTrue(os.path.isfile(os.path.join(d, stem)), stem)
 
     def test_a_generated_command_is_prunable_downstream(self):
         """The old prose files were invisible to sync_commands, so a consumer
