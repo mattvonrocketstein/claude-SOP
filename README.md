@@ -21,7 +21,7 @@ This repo tries to work around that using everything else that's available.  So 
 
 Yup, a real person writes *most* of these docs, and curates the rest.  Be advised however that this is *definitely* a vibe-coded solution for vibe-coding problems.  I mean, come on, it is probably better than *nothing*, right?  Right?!
 
-**Quick Links:** [The Problem](#the-problem-missing-user-modes) | [Enter CSOP](#enter-csop) | [Compare And Contrast](#compare-and-contrast) | [Examples](#examples) | [Install](#install) | [Discipline Details](#discipline-details) | [Configuration Layering](#configuration-layering) | [Abstractions](#abstractions) | [Misc Notes](#misc-notes)
+**Quick Links:** [The Problem](#the-problem-missing-user-modes) | [Enter CSOP](#enter-csop) | [Compare & Contrast](#compare--contrast) | [Examples](#example-disciplines) | [Install](#install) | [Command List](#command-list) | [Discipline Details](#discipline-details) | [Configuration Layering](#configuration-layering) | [Abstractions](#abstractions) | [Misc Notes](#misc-notes)
 
 ## The Problem: Missing User Modes
 
@@ -43,7 +43,7 @@ Anyway.. who cares?  Everyone should!  There's a lot of possibilities between re
 
 With Claude's real mode internals unavailable for extension, this plugin fakes it by using everything else that *is* available, and allows for configuring, activating, and deactivating progressive *layers* of restrictions.
 
-* **A Discipline** is a structured group of *permissions, prompts, hooks, pre-turn nudges, and post-turn reminders*.
+* **A Discipline** is a structured group of *permissions, prompts, hooks, pre-turn nudges, and post-turn reminders* (a reminder fires only on a turn where the discipline acted).
 
 * **A SOP** is a group of active disciplines, and `/sop` is the management tool.  
 
@@ -63,7 +63,7 @@ The CLI application has more native support, so it looks like this:
 
 <img src="docs/img/csop-modeline-cli.png" alt="CSOP modeline in the CLI">
 
-## Compare And Contrast
+## Compare & Contrast
 
 With definitions in hand, back to Claude's built-in agents for a second.  Those *can't be* a discipline.  But disciplines do *compose with agents*, since hooks fire inside subagents too.  A discipline then is.. basically the deterministic foundation any agent runs on, regardless of the rest of the prompts that are in play.
 
@@ -83,7 +83,7 @@ List below is incomplete!  Lots of in-flight WIP and experiments are in the repo
 | **[Generative Hygiene](#generative-hygiene)** | `hyg` | on | [code](hooks/csop-gate-hyg.py) | Curbs externalization of chain-of-thought in code comments.  Implies `racc`. |
 | **[IsolatedTree](#isolatedtree)** | `iso` | opt-in | [code](hooks/csop-gate-isowrite.py) | Risky/exploratory/experimental changes to a project's core must be prototyped in an isolated git worktree (an 'iso-tree') under the crash-safe, in-repo, gitignored `home` (default scratch/iso/), never /tmp. |
 | **Scratch** | `scratch` | on | [code](hooks/csop-gate-scratch.py) | Discourages/denies destructive commands, directing agent to use scratch folder. |
-| **Promotion** | `pro` | opt-in | [code](hooks/csop-gate-promotion.py) | Changes to core should be deliberate promotions of work proven in an iso-tree/scratch (small, tested, reviewable diffs), not ad-hoc edits. |
+| **Promotion** | `pro` | opt-in | [code](hooks/csop-gate-promotion.py) | Edit-time rule over stages, which work without it: an edit outside the current stage's writable set fires `action`, and entering a stage without a legal `from` source fires its `pre`. |
 | **[Frozen Features](#frozen-features)** | `freeze` | opt-in | [code](hooks/csop-gate-pathblock.py) | Protects frozen paths and file regions from access. |
 | **[Testing Discipline](#testing-discipline)** | `tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | No hypothesis, no test run; a full-suite run is the human's opt-in. Regex-gated. |
 | **[Python Testing](#testing-discipline)** | `py-tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | Testing Discipline pre-rolled for pytest. |
@@ -100,9 +100,15 @@ The pattern with the more interesting stuff is generalizing a prompt-based role 
 
 ## Install
 
-Projects opt in to CSOP using plain files wired through `${CLAUDE_PROJECT_DIR}.  No marketplace, no plugin install, no manifest. Just put a checkout somewhere in (or reachable from) the project, then run `make install` **from** CSOP, **inside** the project folder.
+Projects opt in to CSOP using plain files wired through `${CLAUDE_PROJECT_DIR}`.  No marketplace, no plugin install, no manifest. Just put a checkout somewhere in (or reachable from) the project, then run `make install` **from** CSOP, **inside** the project folder.
 
 **Requires Claude Code v2.1.196 or later.** 
+
+Pick one:
+
+- [Via Submodule](#install-via-submodule): recommended; pinned version, upgrades are a git command.
+- [Without Submodule](#without-submodule): a plain clone, inside or outside the project.
+- [Via Tarball](#install-via-tarball): plain files with no git at all, for one-off local installs.
 
 ### Install Via Submodule
 
@@ -116,40 +122,22 @@ git submodule add \
 && make -C .claude/csop install
 ```
 
-This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and creates the `/sop`, `/disc`, `/discipline`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`, `/offtopic`, `/focus`, `/unclear`, `/yap`, and `/unsat` commands. The merge syncs rather than appends, so re-running it after an upgrade is safe. Then start a Claude Code session in the project and approve workspace trust once. (Install already appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`.)
-
-| Command | Alias | Says |
-| --- | --- | --- |
-| `/offtopic` | `/focus` | You lost the thread. Restate the mission, then return to it. |
-| `/unclear` | `/yap` | Too much fluff. Restate against the mission with relevant facts only. |
-| `/unsat` | | The turn failed its basic goal. Review recent turns, then complete the task. |
-
-These three are prose, not machinery: each is a fixed instruction aimed at the model, and its text lives once in [`nags.py`](hooks/nags.py).
-
-Every CSOP slash command is generated, not hand-written. Two tables define them: [`nags.py`](hooks/nags.py) for the prose commands above, and [`forwards.py`](hooks/forwards.py) for the ones that hand a verb to the CLI (`/sop`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`). `make commands` renders one file per name and per alias, so `/focus` and `/disc` are pointers to a table entry rather than copies that drift from it. Add a command or an alias by editing the table and re-running the target. `make init` and the test suite both fail on a checkout where the files and the tables disagree.
-
-The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
-
-`/sop catalog` lists every discipline one line to a row, with a `*` on the active ones, and `/sop show <name>` prints one in full. Both answer instantly and exactly: [`csop-command.py`](hooks/csop-command.py), a `UserPromptSubmit` hook, runs the read-only verbs itself and blocks the prompt, so the harness never queries the model. Fixed text does not need a model to retype it, and a model asked to retype it may paraphrase instead. The mutating verbs keep the model path on purpose, since that is where the permission prompt lives.
-
-Disabling is human-only. The agent can arm a discipline but never disarm one: an always-on rail, [`csop-gate-disarm.py`](hooks/csop-gate-disarm.py), blocks every route from a tool call to a smaller active set, including edits to csop's own state. A slash command reaches `disable` because its body runs a fixed command shape that the rail escalates to a permission prompt, and only a human can clear a prompt. Approve one only when you just typed the command yourself.
-
+This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and generates the CSOP slash commands (see [Command List](#command-list)). The merge syncs rather than appends, so re-running it after an upgrade is safe. Install also appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`. Then start a Claude Code session in the project and approve workspace trust once.
 
 Upgrade later with `git submodule update --remote`; teammates run `git submodule update --init` after cloning.
 
 ### Without Submodule
 
-Any checkout works the same way. Clone or copy the files anywhere and run the
-same target:
+Any git checkout works too. `make install` detects the project root only from a submodule, so pass `DEST` for any other checkout. From the project root:
 
 ```bash
 git clone https://github.com/mattvonrocketstein/claude-SOP tools/csop
-make -C tools/csop install
+make -C tools/csop install DEST="$PWD"
 ```
 
-If the checkout lives OUTSIDE the project (a shared install used by several
-repos, where the git superproject can't be detected), point `make install` at
-the project root:
+A clone inside the project is a nested repo that git will not track as ordinary files, so add its directory to `.gitignore`.
+
+The checkout can also live outside the project, as a shared install used by several repos:
 
 ```bash
 make -C /path/to/csop install DEST=/path/to/your/project
@@ -158,6 +146,54 @@ make -C /path/to/csop install DEST=/path/to/your/project
 Either way the result is identical: `.claude/settings.json` plus the commands are
 written into the project, and each project keeps its own state and
 `.claude/csop.json` overrides.
+
+### Install Via Tarball
+
+For a one-off local install that is neither a submodule nor a git checkout, extract a release tarball into the project. You get plain files with no `.git` directory, so git never sees an embedded repo. Run this from the project root:
+
+```bash
+mkdir -p .claude/csop \
+&& curl -fsSL https://github.com/mattvonrocketstein/claude-SOP/archive/refs/heads/main.tar.gz \
+   | tar -xz --strip-components=1 -C .claude/csop \
+&& make -C .claude/csop install DEST="$PWD"
+```
+
+- **Pin a version**: replace `refs/heads/main` with `refs/tags/<tag>`, or use `archive/<commit-sha>.tar.gz`.
+- **`DEST` is required**: without a submodule, `make install` cannot detect the project root on its own.
+- **Commit or ignore**: commit `.claude/csop/` to vendor a pinned copy for the team, or add it to `.gitignore` to keep it local.
+- **Upgrade**: move the old `.claude/csop/` aside, then rerun the command.
+
+## Command List
+
+`make install` generates these slash commands in the project:
+
+| Command | Alias | Does |
+| --- | --- | --- |
+| `/sop` | `/disc`, `/discipline` | Lists, enables, or shows disciplines: `enable`, `list`, `catalog`, `show`. |
+| `/sop-disable` | | Turns a discipline off, or `all`. Human-only. |
+| `/stage` | | Shows the current and available stages, or sets the current stage. |
+| `/promote` | | Promotes the current stage to its next stage. |
+| `/demote` | | Demotes the current stage to one of its `from` sources. |
+| `/ticket` | | Shows the declared ticket, or declares one over the current stage. |
+| `/offtopic` | `/focus` | You lost the thread. Restate the mission, then return to it. |
+| `/unclear` | `/yap` | Too much fluff. Restate against the mission with relevant facts only. |
+| `/unsat` | | The turn failed its basic goal. Review recent turns, then complete the task. |
+
+### Enabling and inspecting disciplines
+
+The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
+
+`/sop catalog` lists every discipline one line to a row, with a `*` on the active ones, and `/sop show <name>` prints one in full. Both answer instantly and exactly: [`csop-command.py`](hooks/csop-command.py), a `UserPromptSubmit` hook, runs the read-only verbs itself and blocks the prompt, so the harness never queries the model. Fixed text does not need a model to retype it, and a model asked to retype it may paraphrase instead. The mutating verbs keep the model path on purpose, since that is where the permission prompt lives.
+
+Disabling is human-only. The agent can arm a discipline but never disarm one: an always-on rail, [`csop-gate-disarm.py`](hooks/csop-gate-disarm.py), blocks every route from a tool call to a smaller active set, including edits to csop's own state. A slash command reaches `disable` because its body runs a fixed command shape that the rail escalates to a permission prompt, and only a human can clear a prompt. Approve one only when you just typed the command yourself.
+
+### Nag commands
+
+`/offtopic`, `/unclear`, and `/unsat` are prose, not machinery: each is a fixed instruction aimed at the model, and its text lives once in [`nags.py`](hooks/nags.py).
+
+### How commands are generated
+
+Every CSOP slash command is generated, not hand-written. Two tables define them: [`nags.py`](hooks/nags.py) for the nag commands, and [`forwards.py`](hooks/forwards.py) for the ones that hand a verb to the CLI (`/sop`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`). `make commands` renders one file per name and per alias, so `/focus` and `/disc` are pointers to a table entry rather than copies that drift from it. Add a command or an alias by editing the table and re-running the target. `make init` and the test suite both fail on a checkout where the files and the tables disagree.
 
 -------------------------------------------
 
@@ -448,6 +484,18 @@ it. Everything else replaces.
 A stage becomes current via `/sop stage <name>` (or `/promote`), and the stage
 layer applies to every gate that reads its discipline through `get()`.
 
+Stages do not require the `Promotion` discipline. The `stages` map, the current
+stage latch, the `/stage`, `/promote`, `/demote`, and `/ticket` verbs, the
+per-stage `disciplines` overrides, and the stage display all work with `pro`
+off. Two keys are inert without it: `writable` (and the `globs` union behind
+it), which denies an edit belonging to a stage you have not reached, and `pre`,
+the once-per-session prompt for entering a stage without a legal `from` source.
+`post` needs it too. Turning `pro` on adds one rule, that you may not edit ahead
+of where the work has been promoted.
+
+Note the two senses of the word. `/promote` is navigation and works regardless;
+`Promotion` is the discipline that constrains edits.
+
 -------------------------------------------
 
 ## Abstractions 
@@ -466,8 +514,8 @@ preamble.
 ┗ Active Stage :: core
 ```
 
-`Active Disciplines` lists only what is on. `Active Stage` (shown when `pro` is
-active and the project defines stages) names the current stage, or
+`Active Disciplines` lists only what is on. `Active Stage` (shown whenever the
+project defines stages, with or without `pro`) names the current stage, or
 `(none current)`. Any one-time notice prints above the box, under a `⬥`. Rows
 wrap at a fixed inner width here rather than in the host, which wraps mid-word.
 Markers, not styling, carry the meaning: the desktop app renders neither ANSI nor
@@ -483,6 +531,18 @@ not the human, so they go out as `additionalContext` on the same hook instead.
 That hands the turn back to the model so a reminder can be acted on rather than
 merely displayed. The box prints on the return pass, which carries
 `stop_hook_active`, so it appears once per turn and the handback happens once.
+
+**Reminders are armed, never unconditional.** A reminder fires only for a
+discipline that acted during the turn. A discipline arms its own by declaring
+`reminder_on`, a list of globs whose write arms it (`iso` and `spike` use their
+`home`), or by calling `csop.touch(<codename>)` from a hook when its activity is
+not a path: `mem` arms on a landed memory write in any mode, `tdd` on a test run.
+Arming lasts one turn and the handback drains it.
+
+An unconditional reminder is worse than no reminder. The handback guarantees the
+model another turn, so a follow-up with no referent cannot be discharged by
+silence: the model widens the search until it finds something to report, and a
+memory-hygiene note comes back as an essay about the epistemics of the turn.
 
 Each surface renders `systemMessage` its own way and the hook cannot influence it.
 The CLI prints the box inline. Recent desktop builds put it in a default-collapsed

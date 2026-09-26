@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Promotion gate (codename `pro`): staged-flow prompts.
+"""Promotion gate (codename `pro`): edit-time enforcement of the staged flow.
 
 Fires on the edit tools, Pre and Post, when `pro` is active with a current stage.
 Pre fires the stage's `pre` prompt once per session when no `from` source has
-been current, and denies an edit outside the stage's writable set; Post feeds
-back the stage's `post` note. Fail-open; escape hatch CSOP_PRO=off.
+been current, and enforces `action` on an edit outside the stage's writable set;
+Post feeds back the stage's `post` note. The stage machinery itself is not gated
+on this discipline, only these rules are. Fail-open; escape hatch CSOP_PRO=off.
 """
 import os
 import sys
@@ -37,12 +38,13 @@ def main():
                 DISCIPLINE, cs, post.replace("{file}", fp)), "PostToolUse")
         csop.allow()
 
-    if csop.writable_verdict(fp) == "deny":    # spatial guard: editing ahead of the stage
+    if csop.writable_verdict(fp) == "deny":    # editing ahead of the stage
         fs = csop.stage_of(fp)
-        csop.deny("Promotion ({0}) [{1}]: `{2}` belongs to stage `{3}`, outside "
-                  "what `{1}` may write. Switch with `/sop stage {3}` (promoting "
-                  "from its sources), or edit within `{1}`. Escape hatch: "
-                  "CSOP_PRO=off.".format(DISCIPLINE, cs, fp, fs))
+        csop.enforce(disciplines.Promotion.get("action"),
+                     "Promotion ({0}) [{1}]: `{2}` belongs to stage `{3}`, outside "
+                     "what `{1}` may write. Switch with `/sop stage {3}` (promoting "
+                     "from its sources), or edit within `{1}`. Escape hatch: "
+                     "CSOP_PRO=off.".format(DISCIPLINE, cs, fp, fs))
 
     froms = cfg.get("from") or []
     if not froms:

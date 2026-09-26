@@ -26,8 +26,6 @@ def _segment(label, items):
 
 
 def _stage_names():
-    if "pro" not in csop.effective_active() or csop.escaped("pro"):
-        return []
     names = list(csop.stages_config().keys())
     if not names:
         return []

@@ -11,7 +11,7 @@
   "hacc": {
     "default_enabled": true,         // set false to opt this project out
     // the only git subcommands the agent may run; everything else a human runs:
-    "read_list": ["log", "status", "diff", "show", "blame", "describe", "shortlog", "rev-parse", "rev-list", "ls-files", "ls-tree", "ls-remote", "cat-file", "for-each-ref", "check-ignore", "grep", "add", "worktree add", "worktree list"],
+    "read_list": ["log", "status", "diff", "show", "blame", "describe", "shortlog", "rev-parse", "rev-list", "ls-files", "ls-tree", "ls-remote", "cat-file", "for-each-ref", "check-ignore", "grep", "add", "worktree add", "worktree list", "remote", "remote show", "remote get-url", "config get", "config list", "config --get", "config --get-all", "config --get-regexp", "config --get-urlmatch", "config --list", "config -l"],
   },
 
   "scratch": {

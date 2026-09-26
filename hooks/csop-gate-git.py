@@ -44,7 +44,8 @@ def _classify(tail):
     it, and note whether the call was directed into an iso tree. A subcommand
     that only reads under certain subverbs is returned as both words."""
     iso_scoped = False
-    tokens = re.split(r"[\s;|&()]+", tail.strip())
+    tail = re.split(r"[;|&(){}`\n]", tail, 1)[0]      # this call only
+    tokens = re.split(r"\s+", tail.strip())
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -66,10 +67,13 @@ def _classify(tail):
 
 def _subcommand(tok, rest):
     """The subcommand to match, widened to two words when the read_list draws
-    its line at the subverb rather than the subcommand."""
-    if not any(x.startswith(tok + " ") for x in _READ):
+    its line at the subverb rather than the subcommand. A listed subverb may be
+    a flag, as with a config lookup; any other flag is skipped."""
+    listed = {x.split(" ", 1)[1] for x in _READ if x.startswith(tok + " ")}
+    if not listed:
         return tok
-    subverb = next((t for t in rest if t and not t.startswith("-")), "")
+    subverb = next((t for t in rest
+                    if t in listed or (t and not t.startswith("-"))), "")
     return (tok + " " + subverb).strip()
 
 
@@ -77,6 +81,22 @@ def _iso_exempt(sub, iso_scoped):
     """A git write is exempt when iso is active and this call was directed into
     an iso tree (a disposable sandbox), unless it reaches beyond the tree."""
     return (csop.is_active(_ISO) and iso_scoped and sub not in _NEVER)
+
+
+def _reason(sub, iso_scoped):
+    """Why this write is refused, and the step that actually moves it forward.
+    Naming the unmet condition matters: the exemption needs `iso` active and the
+    call directed into the tree, and advice for the other case reads as a loop."""
+    if not csop.is_active(_ISO):
+        return ("a human runs it (or CSOP_HACC=off). The iso-tree exemption is "
+                "off because `iso` is not active this session; enabling it is "
+                "the human's call too (`/sop enable iso`).")
+    if not iso_scoped:
+        return ("a human runs it (or CSOP_HACC=off). With `iso` active, direct "
+                "the call into the tree (`git -C {0}<name> {1} ...`); a `cd` "
+                "into the tree is invisible here.".format(_ISODIR, sub or ""))
+    return ("it reaches beyond the tree even under the iso exemption, so a "
+            "human runs it (or CSOP_HACC=off).")
 
 
 def main():
@@ -90,12 +110,10 @@ def main():
         if sub in _READ or _iso_exempt(sub, iso_scoped):
             continue                     # a read, or an iso-sandbox history op
         csop.deny(
-            "Human Accountability (hacc): `git {0}` is not a read, so a human "
-            "runs it (or CSOP_HACC=off); reads and `git add` are fine. To "
-            "promote an iso tree, rebase it for freshness inside the tree "
-            "(`git -C {1}<name> rebase <core>`), then reconcile into core by "
-            "edits/inserts -- never a git merge/commit into core.".format(
-                sub or "<unparsed>", _ISODIR))
+            "Human Accountability (hacc): `git {0}` is not a read, so {1} Reads "
+            "and `git add` are fine. Promote an iso tree by reconciling it into "
+            "core with edits/inserts -- never a git merge/commit into "
+            "core.".format(sub or "<unparsed>", _reason(sub, iso_scoped)))
     csop.allow()
 
 

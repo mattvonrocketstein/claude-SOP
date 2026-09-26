@@ -33,7 +33,9 @@ class Discipline:
     requires = ()                            # codenames this discipline co-activates (implies on)
     conflicts = ()                           # codenames mutually exclusive with this one
     nudge = ""                               # pre-turn context (prevent wrong behavior this turn)
-    reminder = ""                            # post-turn context (flag follow-up tasks)
+    reminder = ""                            # post-turn context, only when armed this turn
+    reminder_on = []                         # globs whose write arms `reminder`; a
+                                             # discipline with none arms it from a hook
     overridable = ("default_enabled", "nudge", "reminder")   # props a project may override
     append = ("nudge", "reminder")           # overridable props whose override is
                                              # appended to the code default, not replaced
@@ -111,6 +113,7 @@ class IsoTree(Discipline):
                 "clean diff back to core by edits and tear down the tree under "
                 "`{home}`; if it failed, discard the tree. Don't leave iso-trees "
                 "lying around.")
+    reminder_on = ["{home}**"]
     overridable = ("default_enabled", "home", "nudge", "reminder")
     description = ("Risky/exploratory/experimental changes to a project's core "
                   "must be prototyped in an isolated git worktree (an 'iso-tree') "
@@ -130,7 +133,11 @@ class HumanAccountability(Discipline):
     read_list = ["log", "status", "diff", "show", "blame", "describe",
                  "shortlog", "rev-parse", "rev-list", "ls-files", "ls-tree",
                  "ls-remote", "cat-file", "for-each-ref", "check-ignore",
-                 "grep", "add", "worktree add", "worktree list"]
+                 "grep", "add", "worktree add", "worktree list",
+                 "remote", "remote show", "remote get-url",
+                 "config get", "config list", "config --get", "config --get-all",
+                 "config --get-regexp", "config --get-urlmatch", "config --list",
+                 "config -l"]
     nudge = ("Human Accountability active: git is read-only for you -- don't "
                 "commit/stash/checkout/push/reset/rm/etc; ask the human to run "
                 "git writes. exception when iso is active: git history ops "
@@ -194,14 +201,17 @@ class Promotion(Discipline):
                 "stage you are in with `/sop stage <name>`, and enter a later "
                 "stage only as a promotion from one of its `from` sources. New work "
                 "starts in an entry stage (a demo or an iso tree), not in core.")
-    overridable = ("default_enabled", "nudge")
-    description = ("Staged promotion flow over the top-level `stages` map. One "
-                   "current stage per session (a sticky latch set by `/sop stage`, "
-                   "seeded from a stage's `default_stage`), a `from`-DAG of legal "
-                   "sources, and per-stage `pre`/`post` prompts. Entering a stage "
-                   "with no active `from` source fires its `pre`; `post` fires after "
-                   "edits. Per-stage `disciplines` overrides apply whenever a current "
-                   "stage is set, independently of `pro`. Gate: promotion over edits.")
+    action = "deny"                   # editing outside the stage's writable set
+    overridable = ("default_enabled", "action", "nudge")
+    description = ("Edit-time enforcement of the staged flow: an edit outside the "
+                   "current stage's writable set fires `action`, and entering a "
+                   "stage with no active `from` source fires its `pre` once. The "
+                   "stages themselves are not this discipline. The `stages` map, "
+                   "the current-stage latch, the `/sop stage`, `/promote`, "
+                   "`/demote`, and `/ticket` verbs, per-stage `disciplines` "
+                   "overrides, and the stage display all work with `pro` off. "
+                   "Turning it on adds the rule that you may not edit ahead of "
+                   "where the work has been promoted. Gate: promotion over edits.")
 
 
 class GenerativeHygiene(Discipline):
@@ -444,6 +454,7 @@ class FeatureSpike(Discipline):
     reminder = ("Feature Spike follow-up: this was throwaway. Capture the lesson "
                 "in a note, then discard the spike code in `{home}`; do not "
                 "promote it as-is -- rewrite properly if the idea holds.")
+    reminder_on = ["{home}**"]
     overridable = ("default_enabled", "home", "action", "nudge", "reminder")
     description = ("A time-boxed, throwaway exploratory spike to de-risk or learn "
                    "-- kept in `home` (derived from Scratch's `home`), "

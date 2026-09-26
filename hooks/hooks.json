@@ -66,6 +66,7 @@
     {
       "matcher": "Edit|Write|MultiEdit|NotebookEdit",
       "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-touch.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-react-ftypes.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-report-mem.py\"" },
         { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/csop-report-tdd.py\"" },

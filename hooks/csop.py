@@ -120,6 +120,37 @@ def drain_notices():
     return data
 
 
+def touch(codename):
+    """Arm `codename`'s post-turn reminder: the discipline acted this turn, so a
+    follow-up has something to point at. A reminder that fires on every turn
+    points at nothing, and the model answers an empty prompt with an essay."""
+    path = state_path("touched.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        data = []
+    if codename in data:
+        return
+    data.append(codename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+
+def drain_touched():
+    """Return the codenames armed this turn and clear them."""
+    path = state_path("touched.json")
+    try:
+        data = json.load(open(path))
+    except Exception:
+        data = []
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return data
+
+
 def pend(key, text):
     """Hold `text` for a later hook in the same tool call, keyed by `key`. A
     PostToolUse hook cannot recover what a write added, since the file already
@@ -608,6 +639,9 @@ _WRITE_CONSTRUCTS = {
     "vcs patch": r"\bgit\b[^|]*\bapply\b",
 }
 _CREATORS = (r"\btouch\b", r"\bmkdir\b", r"\bchmod\b")
+_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+_NESTED = re.compile(r"\b(?:python[0-9.]*|node|ruby|perl|php|deno|bun|"
+                     r"(?:ba|z|k|da)?sh)\b[^|]*\s-[A-Za-z]*c\b")
 _INLINE_RUNTIME = re.compile(r"\b(?:python[0-9.]*|node|ruby|perl|php|deno|bun)\b[^|]*"
                              r"(?:\s-[ce]\b|\s-\s*<<)")
 _INLINE_WRITE = re.compile(r"open\s*\([^)]*['\"](?:[wax]|r\+)[b+]*['\"]"
@@ -617,11 +651,20 @@ _INLINE_WRITE = re.compile(r"open\s*\([^)]*['\"](?:[wax]|r\+)[b+]*['\"]"
                            r"|os\.(?:replace|rename|remove|unlink)|Path\([^)]*\)\.write")
 
 
+def unquoted(command):
+    """`command` with its quoted spans blanked, so a shell operator counts only
+    where the shell would act on it: an arrow in an echo string is text, not a
+    redirect. A nested interpreter call keeps its quotes, since there the quoted
+    span is a script that really can write."""
+    cmd = command or ""
+    return cmd if _NESTED.search(cmd) else _QUOTED.sub(" ", cmd)
+
+
 def destructive_verbs(command):
     """Filesystem-restructuring verbs present in a shell command, matched at a
     word boundary so `chmod` or `alarm` do not trip. Returns the sorted set of
     matched verbs, empty if none."""
-    return sorted({m.group(1) for m in _DESTRUCTIVE.finditer(command or "")})
+    return sorted({m.group(1) for m in _DESTRUCTIVE.finditer(unquoted(command))})
 
 
 def write_constructs(command):
@@ -629,7 +672,7 @@ def write_constructs(command):
     hide the change from a diff: a redirect or heredoc, an in-place editor, a
     patch, `install`, and an inline interpreter script that opens a file for
     writing. Returns the sorted set of names, empty if none."""
-    cmd = command or ""
+    cmd = unquoted(command)
     found = {n for n, rx in _WRITE_CONSTRUCTS.items() if re.search(rx, cmd)}
     if _INLINE_RUNTIME.search(cmd) and _INLINE_WRITE.search(cmd):
         found.add("inline script")
@@ -642,7 +685,7 @@ def mutates_files(command):
     that a path was written, not how."""
     cmd = command or ""
     return bool(destructive_verbs(cmd) or write_constructs(cmd)
-                or any(re.search(rx, cmd) for rx in _CREATORS))
+                or any(re.search(rx, unquoted(cmd)) for rx in _CREATORS))
 
 
 # ---- escape hatch ----------------------------------------------------------

@@ -95,10 +95,10 @@ def _disciplines():
 
 
 def _stages():
-    """When `pro` is active, the stage the work is in. Only the current one: the
-    roster is what `/sop stage` prints, and the footer answers where you are."""
-    if "pro" not in csop.effective_active() or csop.escaped("pro"):
-        return []
+    """The stage the work is in, shown whenever the project defines stages. Not
+    gated on `pro`: a stage rewrites the active discipline set with or without
+    that discipline, so hiding which stage is current hides a live policy change.
+    Only the current one, since the roster is what `/sop stage` prints."""
     if not csop.stages_config():
         return []
     cur = csop.current_stage()
@@ -133,11 +133,14 @@ def render():
 
 
 def _reminders():
-    """Each active discipline's post-turn `reminder` (follow-up tasks), as plain
-    text: this one goes to the model, where styling is only noise."""
+    """The post-turn `reminder` of each discipline that acted this turn, as plain
+    text: this one goes to the model, where styling is only noise. Firing every
+    active discipline's reminder instead aims most of them at nothing, and the
+    handback then buys an essay about the turn in place of a follow-up."""
     out, act = [], csop.effective_active()
+    armed = csop.drain_touched()
     for d in disciplines.DISCIPLINES:
-        if d.codename in act and not csop.escaped(d.codename):
+        if d.codename in act and d.codename in armed and not csop.escaped(d.codename):
             r = d.render("reminder")
             if r:
                 out.append("{0}: {1}".format(d.name, r))

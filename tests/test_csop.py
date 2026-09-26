@@ -186,6 +186,19 @@ class ShellChecks(unittest.TestCase):
                     self.DEL + " -f f.py"):
             self.assertEqual(csop.write_constructs(cmd), [], cmd)
 
+    def test_shell_operators_inside_quotes_are_text(self):
+        for cmd in ("echo \"gate -> allowed\"",
+                    "git worktree add scratch/iso/x && echo \"added -> ok\"",
+                    "grep -n 'a->b' src.c",
+                    "echo 'use a > b comparison'"):
+            self.assertEqual(csop.write_constructs(cmd), [], cmd)
+        self.assertEqual(csop.destructive_verbs("echo '" + self.DEL + " -rf /'"), [])
+        # a nested interpreter keeps its quotes: the quoted span is a real script
+        self.assertIn("redirect", csop.write_constructs("bash -c 'echo x > f.py'"))
+        self.assertIn("inline script",
+                      csop.write_constructs("python3 -c \"open('f','a').write('x')\""))
+        self.assertIn("redirect", csop.write_constructs("echo \"a\" > f.py"))
+
     def test_mutates_files_is_the_broad_question(self):
         for cmd in ("sed -i s/a/b/ f.py", "echo hi > f.py", self.DEL + " -f f.py",
                     "mv a b", "cp a b", "touch a", "mkdir -p a/b"):
@@ -301,6 +314,8 @@ class CliChecks(unittest.TestCase):
     def test_modeline_sends_reminders_to_the_agent_and_the_box_to_the_human(self):
         env = _env(NO_COLOR="1"); _cli(["enable", "iso"], env)
         stop = {"hook_event_name": "Stop"}
+        _gate("csop-touch.py", {"hook_event_name": "PostToolUse", "tool_name": "Write",
+                                "tool_input": {"file_path": "scratch/iso/t/a.py"}}, env)
         first = json.loads(_gate("csop-modeline.py", stop, env).stdout.decode())
         self.assertIn("IsolatedTree follow-up",
                       first["hookSpecificOutput"]["additionalContext"])
@@ -310,6 +325,35 @@ class CliChecks(unittest.TestCase):
         self.assertIn("Active Disciplines", back["systemMessage"])
         self.assertNotIn("follow-up", back["systemMessage"])
         self.assertNotIn("hookSpecificOutput", back)   # one handback, never a loop
+
+    def test_modeline_reminder_stays_silent_on_a_turn_the_discipline_sat_out(self):
+        env = _env(NO_COLOR="1"); _cli(["enable", "iso"], env)
+        stop = {"hook_event_name": "Stop"}
+        first = json.loads(_gate("csop-modeline.py", stop, env).stdout.decode() or "{}")
+        self.assertNotIn("hookSpecificOutput", first)  # nothing was written under iso
+        self.assertIn("Active Disciplines", first["systemMessage"])
+
+    def test_mem_write_arms_its_reminder_in_every_mode(self):
+        for mode in ("approval", "visible"):
+            proj = _project({"mem": {"mode": mode}},
+                            {"MEMORY.md": "the user prefers tabs\n"})
+            env = _env(NO_COLOR="1", CLAUDE_PROJECT_DIR=proj)
+            _cli(["enable", "mem"], env)
+            _gate("csop-report-mem.py",
+                  _wr(os.path.join(proj, "MEMORY.md"), "the user prefers tabs\n"), env)
+            out = _gate("csop-modeline.py", {"hook_event_name": "Stop"}, env)
+            first = json.loads(out.stdout.decode() or "{}")
+            self.assertIn("Memory Accountability follow-up",
+                          first["hookSpecificOutput"]["additionalContext"], mode)
+
+    def test_reminder_arming_is_one_turn_only(self):
+        env = _env(NO_COLOR="1"); _cli(["enable", "iso"], env)
+        stop = {"hook_event_name": "Stop"}
+        _gate("csop-touch.py", {"hook_event_name": "PostToolUse", "tool_name": "Write",
+                                "tool_input": {"file_path": "scratch/iso/t/a.py"}}, env)
+        _gate("csop-modeline.py", stop, env)           # drains the arming
+        again = json.loads(_gate("csop-modeline.py", stop, env).stdout.decode() or "{}")
+        self.assertNotIn("hookSpecificOutput", again)
 
     def test_requires_closure(self):
         self.assertIn("hyg", _cli(["enable", "techwrite"], _env()).stdout.decode())
@@ -354,6 +398,23 @@ class GateChecks(unittest.TestCase):
         self.assertTrue(_denied(_gate("csop-gate-git.py",
                         _bash("git -C scratch/iso/mk push"), env)))
 
+    def test_hacc_denial_names_the_unmet_condition(self):
+        env = _env(); _cli(["enable", "hacc"], env)
+        # iso off: the message must not prescribe the command it also denies
+        off = _gate("csop-gate-git.py",
+                    _bash("git -C scratch/iso/mk rebase main"), env).stdout.decode()
+        self.assertIn("`iso` is not active", off)
+        self.assertNotIn("rebase <core>", off)
+        _cli(["enable", "iso"], env)
+        # iso on but the call is not directed into the tree
+        undirected = _gate("csop-gate-git.py",
+                           _bash("cd scratch/iso/mk && git " + "rebase main"),
+                           env).stdout.decode()
+        self.assertIn("is invisible here", undirected)
+        beyond = _gate("csop-gate-git.py",
+                       _bash("git -C scratch/iso/mk push"), env).stdout.decode()
+        self.assertIn("reaches beyond the tree", beyond)
+
     def test_hacc_reads_survive_unrelated_clauses(self):
         env = _env(); _cli(["enable", "hacc"], env)
         for cmd in ("git log --oneline && make " + "clean",
@@ -386,6 +447,31 @@ class GateChecks(unittest.TestCase):
             self.assertFalse(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
         for cmd in ("git worktree " + "remove scratch/iso/mk",
                     "git worktree " + "prune"):
+            self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+
+    def test_hacc_config_and_remote_reads_only(self):
+        env = _env(); _cli(["enable", "hacc"], env)
+        for cmd in ("git config --get remote.origin.url",
+                    "git -C /some/repo config --get remote.origin.url",
+                    "git config --global --get user.name",
+                    "git config --get-regexp remote",
+                    "git config --list", "git config -l",
+                    "git config get user.name", "git config list",
+                    "git remote", "git remote -v", "git remote --verbose",
+                    "git remote show origin", "git remote get-url origin",
+                    "git remote -v && git status",
+                    "git config --get user.name; git log"):
+            self.assertFalse(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
+        for cmd in ("git config user.name x",
+                    "git config --global user.name x",
+                    "git config --" + "unset user.name",
+                    "git config --add a.b c",
+                    "git config set user.name x",
+                    "git remote add up https://example.com/r.git",
+                    "git remote set-url origin x",
+                    "git remote " + "remove origin",
+                    "git remote rename origin up",
+                    "git remote -v && git " + "commit -m x"):
             self.assertTrue(_denied(_gate("csop-gate-git.py", _bash(cmd), env)), cmd)
 
     def test_orphan_config_key_is_inert(self):
@@ -1289,6 +1375,24 @@ class StageChecks(unittest.TestCase):
         out = _gate("csop-modeline.py", {"hook_event_name": "Stop"}, env).stdout.decode()
         self.assertIn("Stage", out)
         self.assertIn("module", out)
+
+    def test_modeline_shows_stage_without_pro(self):
+        env = _env(CLAUDE_PROJECT_DIR=self._proj()); _cli(["stage", "module"], env)
+        out = _gate("csop-modeline.py",
+                    {"hook_event_name": "Stop", "stop_hook_active": True},
+                    env).stdout.decode()
+        self.assertIn("module", out)                  # a stage rewrites disciplines with pro off
+        self.assertNotIn("pro", out)
+
+    def test_writable_action_is_overridable(self):
+        proj = _project({"pro": {"action": "nudge"},
+                         "stages": {"demo": {"default_stage": True, "globs": ["demos/**"]},
+                                    "module": {"globs": ["src/**"], "from": ["demo"]}}})
+        env = _env(CLAUDE_PROJECT_DIR=proj); _cli(["enable", "pro"], env)
+        _cli(["stage", "demo"], env)
+        cp = _gate("csop-gate-promotion.py", self._w("src/foo.mk"), env)
+        self.assertFalse(_denied(cp))                 # deny downgraded to a nudge
+        self.assertIn("additionalContext", cp.stdout.decode())
 
     def test_writable_denies_ahead_of_stage(self):
         env = _env(CLAUDE_PROJECT_DIR=self._proj()); _cli(["enable", "pro"], env)

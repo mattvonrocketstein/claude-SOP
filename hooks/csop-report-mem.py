@@ -4,7 +4,8 @@
 A memory write that landed is queued as a notice, so the end-of-turn modeline
 names it. That is the whole mechanism under `visible`, and an alarm under
 `amnesiac`, where reaching this hook means the permission layer dropped the
-denial. Silent under `approval`. Never blocks; escape hatch CSOP_MEM=off.
+denial. Silent under `approval`, which still arms the post-turn reminder: a
+landed memory write is the only thing that arms it. Escape hatch CSOP_MEM=off.
 """
 import os
 import sys
@@ -31,12 +32,13 @@ def main():
         active, _ = csop.effective(DISCIPLINE, None)
         if tool not in _WRITE_TOOLS or not active or csop.escaped(DISCIPLINE):
             sys.exit(0)
-        mode = (_MEM.get("mode") or "approval").lower()
-        if mode not in ("visible", "amnesiac"):
-            sys.exit(0)
         ti = event.get("tool_input", {}) or {}
         path = csop.write_target(tool, ti)
         if not path or not csop.path_matches(path, _MEM.get("paths")):
+            sys.exit(0)
+        csop.touch(DISCIPLINE)
+        mode = (_MEM.get("mode") or "approval").lower()
+        if mode not in ("visible", "amnesiac"):
             sys.exit(0)
         gist = csop.take("mem:" + path)
         if gist is None:

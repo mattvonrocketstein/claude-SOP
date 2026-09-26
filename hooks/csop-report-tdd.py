@@ -56,6 +56,8 @@ def main():
         scope = csop.take("tdd:" + cmd)
         if scope is None:
             sys.exit(0)
+        for d in members:
+            csop.touch(d.codename)
         counts = _counts(event.get("tool_response", ""))
         tail = " [{0}]".format(counts) if counts else ""
         csop.push_notice("tests ran ({0}): {1}{2}".format(
