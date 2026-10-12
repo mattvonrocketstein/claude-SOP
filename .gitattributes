@@ -1,0 +1,2 @@
+# CSOP's own dev config stays out of release tarballs; docs/csop.example.json ships instead.
+/.claude export-ignore

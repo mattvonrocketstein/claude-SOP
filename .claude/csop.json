@@ -1,5 +1,5 @@
 {
-  // CSOP project config -- the model other projects copy and edit.
+  // CSOP's own project config (self-hosting). Other projects start from docs/csop.example.json.
   // Overrides code-default properties per discipline (keyed by codename); only a
   // discipline's overridable properties are honored -- identity/description live
   // in code. Parsed as JSON-with-comments (// and /* */, trailing commas ok).

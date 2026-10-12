@@ -112,6 +112,24 @@ class StaticChecks(unittest.TestCase):
             with open(os.path.join(ROOT, rel)) as f:
                 json.load(f)
 
+    def test_example_config_names_real_params(self):
+        import csop, disciplines
+        with open(os.path.join(ROOT, "docs", "csop.example.json")) as f:
+            cfg = csop.loads_jsonc(f.read())
+        stage_keys = {"globs", "from", "writable", "disciplines", "pre", "post",
+                      "default_stage"}
+
+        def check(block, where):
+            for code, params in block.items():
+                d = disciplines.by_codename(code)
+                self.assertIsNotNone(d, "{0}: unknown codename {1}".format(where, code))
+                for k in params:
+                    self.assertIn(k, d.overridable, "{0}: {1}.{2}".format(where, code, k))
+        check({k: v for k, v in cfg.items() if k not in ("stages", "ticket")}, "top")
+        for name, stage in cfg.get("stages", {}).items():
+            self.assertLessEqual(set(stage), stage_keys, name)
+            check(stage.get("disciplines", {}), "stage " + name)
+
     def test_jsonc_valid(self):
         with open(os.path.join(ROOT, ".claude", "csop.json")) as f:
             csop.loads_jsonc(f.read())
@@ -822,6 +840,20 @@ class GateChecks(unittest.TestCase):
         # blank lines and bare delimiters are structure, so they cost nothing
         spaced = '"""\n' + "\n".join(lines(docmax).splitlines()) + '\n\n\n"""\n'
         self.assertFalse(_denied(_gate("csop-gate-hyg.py", write("x.py", spaced), env)))
+
+    def test_hyg_shebang_header_is_documentation(self):
+        env = _env(); _cli(["enable", "hyg"], env)
+        docmax = disciplines.GenerativeHygiene.doc_max_comment_lines
+        body = lambda n: "".join("# line {0}\n".format(i) for i in range(n))
+        header = lambda n: "#!/bin/sh\n#\n" + body(n) + "#\nv=1\n"
+        self.assertFalse(_denied(_gate("csop-gate-hyg.py", _wr("x.sh", header(docmax)), env)))
+        self.assertTrue(_denied(_gate("csop-gate-hyg.py", _wr("x.sh", header(docmax + 1)), env)))
+        # the header ends at the first line of code, so a later run keeps the comment budget
+        later = "#!/bin/sh\nv=1\n" + body(3) + "w=2\n"
+        self.assertTrue(_denied(_gate("csop-gate-hyg.py", _wr("x.sh", later), env)))
+        # an edit that rewrites the header from the shebang down is judged the same way
+        edit = _edit(path="x.sh", old="#!/bin/sh\n# one\n", new=header(docmax - 3))
+        self.assertFalse(_denied(_gate("csop-gate-hyg.py", edit, env)))
 
     def test_hyg_banner_separates_runs(self):
         env = _env(); _cli(["enable", "hyg"], env)

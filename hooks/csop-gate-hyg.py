@@ -77,15 +77,24 @@ def _bad_regions():
 def _scan(text, state=None, markers=None):
     """Classify each line as code, comment, or doc, carrying any open-region
     state so a later chunk can resume. A `doc` line is documentation by its
-    marker: a `doc_prefixes` line or a line inside a `doc_regions` region. Marker
-    shape is the only test, because where a doc block sits relative to what it
-    documents is language-specific, and this gate is not."""
+    marker: a `doc_prefixes` line, a line inside a `doc_regions` region, or a
+    file header, the comment lines that open with a shebang. Marker shape is the
+    only test, because where a doc block sits relative to what it documents is
+    language-specific, and this gate is not."""
     prefixes = _HYG.get("doc_prefixes") or []
     specs = _region_specs()
     line_rx = _line_rx(_HYG.get("unknown_markers") or []
                        if markers is None else markers)
     out = []
-    for ln in (text or "").splitlines():
+    header = (text or "").startswith("#!")
+    for i, ln in enumerate((text or "").splitlines()):
+        if header and i == 0:
+            out.append((ln, "code", None))
+            continue
+        if header and line_rx and line_rx.match(ln):
+            out.append((ln, "doc", None))
+            continue
+        header = False
         if state is not None:
             out.append((ln, "doc", state))
             if specs[state][1].search(ln):

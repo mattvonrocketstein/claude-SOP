@@ -1,13 +1,11 @@
-<table width=100%>
+<table align="center">
   <tr>
-    <td colspan=2><strong>
-    CSOP
-      </strong>&nbsp;&nbsp;&nbsp;&nbsp;
-    </td>
+    <td id="title"><strong>CSOP</strong></td>
+    <td id="mini-toc" align=right><a href="#problem">Problem</a> | <a href="#csop">CSOP</a> | <a href="#examples">Examples</a> | <a href="#install">Install</a> | <a href="#commands">Commands</a> | <a href="#disciplines">Disciplines</a> | <a href="#config">Config</a></td>
   </tr>
   <tr>
-    <td width=15%><img src=docs/img/icon.svg style="width:150px"></td>
-    <td>
+    <td id="logo" width=15%><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icon-dark.svg"><img src="docs/img/icon.svg" width="96" alt="CSOP"></picture></td>
+    <td id="blurb" align=center>
     Claude-SOP, or, Standard Operating Procedures.
     <br/><br/>
     "For SOP Against Slop, choosey choosers choose CSOP."
@@ -21,8 +19,7 @@ This repo tries to work around that using everything else that's available.  So 
 
 Yup, a real person writes *most* of these docs, and curates the rest.  Be advised however that this is *definitely* a vibe-coded solution for vibe-coding problems.  I mean, come on, it is probably better than *nothing*, right?  Right?!
 
-**Quick Links:** [The Problem](#the-problem-missing-user-modes) | [Enter CSOP](#enter-csop) | [Compare & Contrast](#compare--contrast) | [Examples](#example-disciplines) | [Install](#install) | [Command List](#command-list) | [Discipline Details](#discipline-details) | [Configuration Layering](#configuration-layering) | [Abstractions](#abstractions) | [Misc Notes](#misc-notes)
-
+<a id="problem"></a>
 ## The Problem: Missing User Modes
 
 Hooks, skills, and plugins are forever working at this layer that is not quite right.  And once you start thinking about a *mode*, a few things click into place:
@@ -39,6 +36,7 @@ Anyway.. who cares?  Everyone should!  There's a lot of possibilities between re
 
 **What about Agents?**  Subagents (i.e. `.claude/agents/*.md`) are the closest *native* thing to a user-defined mode.  They provide a name, a system prompt, allow-lists for tools.  Still a role though and not yet a mode!  It's the granularity/layer problem again.  Tools-governance is coarse.. it can say "no Bash", but not "Bash *only for `tox`*".  An agent is a *delegate you spawn for a task*, not a persistent constraint that could hard-block your next tool call.  Skill me no skills if they are still just prompts.  There's little room for determinism, or CI-style progressive guarantees andd ratcheting gates.  More on that later.
 
+<a id="csop"></a>
 ## Enter CSOP
 
 With Claude's real mode internals unavailable for extension, this plugin fakes it by using everything else that *is* available, and allows for configuring, activating, and deactivating progressive *layers* of restrictions.
@@ -63,6 +61,7 @@ The CLI application has more native support, so it looks like this:
 
 <img src="docs/img/csop-modeline-cli.png" alt="CSOP modeline in the CLI">
 
+<a id="compare"></a>
 ## Compare & Contrast
 
 With definitions in hand, back to Claude's built-in agents for a second.  Those *can't be* a discipline.  But disciplines do *compose with agents*, since hooks fire inside subagents too.  A discipline then is.. basically the deterministic foundation any agent runs on, regardless of the rest of the prompts that are in play.
@@ -71,22 +70,23 @@ If the whole “stage” thing sounds like reinventing CI/CD, well yeah, wouldn'
 
 **A modest proposal:** Before you propose to manage a swarm autonomously on *any* project with.. *gestures vaguely*… you might want to start with effectively steering something small, on a per-project basis, in an automatic or semi-automatic kind of way.
 
+<a id="examples"></a>
 ## Example Disciplines
 
 List below is incomplete!  Lots of in-flight WIP and experiments are in the repo, so the stuff here is just the things that are starting to feel more stable and definitely worthwhile.  Things you can click are more mature, and offer more extensive docs.
 
 | Discipline | Codename | Default | Code | Summary |
 |---|---|---|---|---|
-| **[Human Accountability](#human-accountability)** | `hacc` | on | [code](hooks/csop-gate-git.py) | Git is read-only for the agent. |
-| **[Robot Accountability](#robot-accountability)** | `racc` | on with `hyg` | [code](hooks/csop-gate-racc.py) | No hiding diffs:  file changes must go through the Edit/Write tool (a visible diff), not in-place shell mutations. |
-| **[Memory Accountability](#memory-accountability)** | `mem` | opt-in | [code](hooks/csop-gate-mem.py) | Memory formation is a human decision: a write to a memory path asks first, is denied, or is reported, per `mode`. Implies `racc`. |
-| **[Generative Hygiene](#generative-hygiene)** | `hyg` | on | [code](hooks/csop-gate-hyg.py) | Curbs externalization of chain-of-thought in code comments.  Implies `racc`. |
-| **[IsolatedTree](#isolatedtree)** | `iso` | opt-in | [code](hooks/csop-gate-isowrite.py) | Risky/exploratory/experimental changes to a project's core must be prototyped in an isolated git worktree (an 'iso-tree') under the crash-safe, in-repo, gitignored `home` (default scratch/iso/), never /tmp. |
+| **[Human Accountability](#hacc)** | `hacc` | on | [code](hooks/csop-gate-git.py) | Git is read-only for the agent. |
+| **[Robot Accountability](#racc)** | `racc` | on with `hyg` | [code](hooks/csop-gate-racc.py) | No hiding diffs:  file changes must go through the Edit/Write tool (a visible diff), not in-place shell mutations. |
+| **[Memory Accountability](#mem)** | `mem` | opt-in | [code](hooks/csop-gate-mem.py) | Memory formation is a human decision: a write to a memory path asks first, is denied, or is reported, per `mode`. Implies `racc`. |
+| **[Generative Hygiene](#hyg)** | `hyg` | on | [code](hooks/csop-gate-hyg.py) | Curbs externalization of chain-of-thought in code comments.  Implies `racc`. |
+| **[IsolatedTree](#iso)** | `iso` | opt-in | [code](hooks/csop-gate-isowrite.py) | Risky/exploratory/experimental changes to a project's core must be prototyped in an isolated git worktree (an 'iso-tree') under the crash-safe, in-repo, gitignored `home` (default scratch/iso/), never /tmp. |
 | **Scratch** | `scratch` | on | [code](hooks/csop-gate-scratch.py) | Discourages/denies destructive commands, directing agent to use scratch folder. |
 | **Promotion** | `pro` | opt-in | [code](hooks/csop-gate-promotion.py) | Edit-time rule over stages, which work without it: an edit outside the current stage's writable set fires `action`, and entering a stage without a legal `from` source fires its `pre`. |
-| **[Frozen Features](#frozen-features)** | `freeze` | opt-in | [code](hooks/csop-gate-pathblock.py) | Protects frozen paths and file regions from access. |
-| **[Testing Discipline](#testing-discipline)** | `tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | No hypothesis, no test run; a full-suite run is the human's opt-in. Regex-gated. |
-| **[Python Testing](#testing-discipline)** | `py-tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | Testing Discipline pre-rolled for pytest. |
+| **[Frozen Features](#freeze)** | `freeze` | opt-in | [code](hooks/csop-gate-pathblock.py) | Protects frozen paths and file regions from access. |
+| **[Testing Discipline](#tdd)** | `tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | No hypothesis, no test run; a full-suite run is the human's opt-in. Regex-gated. |
+| **[Python Testing](#tdd)** | `py-tdd` | opt-in | [code](hooks/csop-gate-tdd.py) | Testing Discipline pre-rolled for pytest. |
 | **Feature Spike** | `spike` | opt-in | [code](hooks/disciplines.py) | A time-boxed, throwaway exploratory spike to de-risk or learn. |
 | **Performance** | `perf` | opt-in | [code](hooks/disciplines.py) | Measure-first performance discipline. |
 | **Tactical Retreat** | `tactical` | opt-in | [code](hooks/disciplines.py) | When a change/experiment is going badly, cleanly retreat to a known-good state and rethink instead of accumulating hacks or churning flip/revert/flip. |
@@ -94,10 +94,11 @@ List below is incomplete!  Lots of in-flight WIP and experiments are in the repo
 | **Consensus** | `consensus` | opt-in | [code](hooks/disciplines.py) | Corroboration / multi-perspective method. |
 | **Epistemics** | `epi` | opt-in | [code](hooks/disciplines.py) | Etas on dispatched work, rag-style citations (`path:line`, command, url) on claims. |
 | **Groomer** | `groom` | opt-in | [code](hooks/disciplines.py) | Behavior-preserving style sweeps (conflicts with iso). |
-| **[Technical Writer](#technical-writer)** | `techwrite` | opt-in | [code](hooks/csop-gate-techwrite.py) | Clear technical writing. |
+| **[Technical Writer](#techwrite)** | `techwrite` | opt-in | [code](hooks/csop-gate-techwrite.py) | Clear technical writing. |
 
 The pattern with the more interesting stuff is generalizing a prompt-based role into something more like a legitimate *practice*.  (Do you prefer to trust a merely prompted "scientist" role, or one that's actually forced to step through the scientific method? 🤔)
 
+<a id="install"></a>
 ## Install
 
 Projects opt in to CSOP using plain files wired through `${CLAUDE_PROJECT_DIR}`.  No marketplace, no plugin install, no manifest. Just put a checkout somewhere in (or reachable from) the project, then run `make install` **from** CSOP, **inside** the project folder.
@@ -106,10 +107,11 @@ Projects opt in to CSOP using plain files wired through `${CLAUDE_PROJECT_DIR}`.
 
 Pick one:
 
-- [Via Submodule](#install-via-submodule): recommended; pinned version, upgrades are a git command.
-- [Without Submodule](#without-submodule): a plain clone, inside or outside the project.
-- [Via Tarball](#install-via-tarball): plain files with no git at all, for one-off local installs.
+- [Via Submodule](#submodule): recommended; pinned version, upgrades are a git command.
+- [Without Submodule](#no-submodule): a plain clone, inside or outside the project.
+- [Via Tarball](#tarball): plain files with no git at all, for one-off local installs.
 
+<a id="submodule"></a>
 ### Install Via Submodule
 
 Recommended.  People hate submodules, but this approach means a plugin-version is pinned and upgrades are a `git` command.  **You probably don't want to just trust me on this,** so just fork this plugin repo to your own ownership.
@@ -122,10 +124,11 @@ git submodule add \
 && make -C .claude/csop install
 ```
 
-This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and generates the CSOP slash commands (see [Command List](#command-list)). The merge syncs rather than appends, so re-running it after an upgrade is safe. Install also appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`. Then start a Claude Code session in the project and approve workspace trust once.
+This merges CSOP's hooks and the `/sop` permission entries into the project's `.claude/settings.json` (paths pointing back at the submodule), preserving any settings already there, and generates the CSOP slash commands (see [Command List](#commands)). The merge syncs rather than appends, so re-running it after an upgrade is safe. Install also appends `.claude/csop-state/`, the runtime state dir, to the project's `.gitignore`. Then start a Claude Code session in the project and approve workspace trust once.
 
 Upgrade later with `git submodule update --remote`; teammates run `git submodule update --init` after cloning.
 
+<a id="no-submodule"></a>
 ### Without Submodule
 
 Any git checkout works too. `make install` detects the project root only from a submodule, so pass `DEST` for any other checkout. From the project root:
@@ -147,6 +150,7 @@ Either way the result is identical: `.claude/settings.json` plus the commands ar
 written into the project, and each project keeps its own state and
 `.claude/csop.json` overrides.
 
+<a id="tarball"></a>
 ### Install Via Tarball
 
 For a one-off local install that is neither a submodule nor a git checkout, extract a release tarball into the project. You get plain files with no `.git` directory, so git never sees an embedded repo. Run this from the project root:
@@ -162,7 +166,9 @@ mkdir -p .claude/csop \
 - **`DEST` is required**: without a submodule, `make install` cannot detect the project root on its own.
 - **Commit or ignore**: commit `.claude/csop/` to vendor a pinned copy for the team, or add it to `.gitignore` to keep it local.
 - **Upgrade**: move the old `.claude/csop/` aside, then rerun the command.
+- **No nested `.claude/`**: the tarball leaves out CSOP's own dev config. A submodule or clone carries it at `.claude/csop/.claude/`, where it is inert.
 
+<a id="commands"></a>
 ## Command List
 
 `make install` generates these slash commands in the project:
@@ -179,7 +185,7 @@ mkdir -p .claude/csop \
 | `/unclear` | `/yap` | Too much fluff. Restate against the mission with relevant facts only. |
 | `/unsat` | | The turn failed its basic goal. Review recent turns, then complete the task. |
 
-### Enabling and inspecting disciplines
+### Enabling and Inspecting Disciplines
 
 The default disciplines activate immediately; opt into the rest with `/sop enable <name>`. Turn one back off with `/sop-disable <name>`, or `/sop-disable all`.
 
@@ -187,18 +193,20 @@ The default disciplines activate immediately; opt into the rest with `/sop enabl
 
 Disabling is human-only. The agent can arm a discipline but never disarm one: an always-on rail, [`csop-gate-disarm.py`](hooks/csop-gate-disarm.py), blocks every route from a tool call to a smaller active set, including edits to csop's own state. A slash command reaches `disable` because its body runs a fixed command shape that the rail escalates to a permission prompt, and only a human can clear a prompt. Approve one only when you just typed the command yourself.
 
-### Nag commands
+### Nag Commands
 
 `/offtopic`, `/unclear`, and `/unsat` are prose, not machinery: each is a fixed instruction aimed at the model, and its text lives once in [`nags.py`](hooks/nags.py).
 
-### How commands are generated
+### How Commands Are Generated
 
 Every CSOP slash command is generated, not hand-written. Two tables define them: [`nags.py`](hooks/nags.py) for the nag commands, and [`forwards.py`](hooks/forwards.py) for the ones that hand a verb to the CLI (`/sop`, `/stage`, `/ticket`, `/promote`, `/demote`, `/sop-disable`). `make commands` renders one file per name and per alias, so `/focus` and `/disc` are pointers to a table entry rather than copies that drift from it. Add a command or an alias by editing the table and re-running the target. `make init` and the test suite both fail on a checkout where the files and the tables disagree.
 
 -------------------------------------------
 
+<a id="disciplines"></a>
 ## Discipline Details
 
+<a id="iso"></a>
 ### IsolatedTree
 
 `iso` · opt-in · enable with `/sop enable iso`
@@ -227,6 +235,7 @@ so a failed experiment never touches core.
 
 - `home`: where trees must live (default `scratch/iso/`).
 
+<a id="freeze"></a>
 ### Frozen Features
 
 `freeze` · opt-in · enable with `/sop enable freeze`
@@ -268,6 +277,7 @@ An entry may carry `exempt` fragments (a worktree copy, say) that skip the shell
 }
 ```
 
+<a id="hacc"></a>
 ### Human Accountability
 
 `hacc` · default-on (opt out with `"default_enabled": false`)
@@ -285,9 +295,10 @@ Git is read-only for the agent, so a human runs core git.
 - `read_list`: the only git subcommands the agent may run.
 - `default_enabled`: on by default; set false to opt this project out.
 
+<a id="racc"></a>
 ### Robot Accountability
 
-`racc` · opt-in, and co-activated by [Generative Hygiene](#generative-hygiene) · enable with `/sop enable racc`
+`racc` · opt-in, and co-activated by [Generative Hygiene](#hyg) · enable with `/sop enable racc`
 
 The agent must change files visibly through the Edit or Write tool, which shows a
 diff, not through in-place shell mutations. It is the robot counterpart to Human
@@ -309,9 +320,10 @@ otherwise be an unchecked path around them.
 - `action`: enforcement strength (default `deny`).
 - `default_enabled`: off by default.
 
+<a id="mem"></a>
 ### Memory Accountability
 
-`mem` · opt-in · implies [`racc`](#robot-accountability) · enable with `/sop enable mem`
+`mem` · opt-in · implies [`racc`](#racc) · enable with `/sop enable mem`
 
 Memory formation is a human decision, not a side effect. A memory file outranks
 instructions in every later session, so a wrong one, recorded from an error, a
@@ -343,6 +355,7 @@ redirect would write a memory unobserved.
 - `excerpt_chars`: cap on quoted memory text in a prompt or modeline notice (default 200).
 - `default_enabled`: off by default.
 
+<a id="tdd"></a>
 ### Testing Discipline
 
 `tdd` · opt-in · enable with `/sop enable tdd`, or `/sop enable py-tdd` for the pytest subclass
@@ -395,9 +408,10 @@ A bare `pytest`, `pytest tests/`, `tox`, or `make test` opens a permission promp
 - `action`: what a suite run does (default `ask`).
 - `nudge`, `reminder`: appended to the built-in text; project rules go here, such as the directory to run from.
 
+<a id="hyg"></a>
 ### Generative Hygiene
 
-`hyg` · default-on (opt out with `"default_enabled": false`) · implies [`racc`](#robot-accountability)
+`hyg` · default-on (opt out with `"default_enabled": false`) · implies [`racc`](#racc)
 
 Comment hygiene on agent-generated code. It rejects the tells of a model narrating to itself in the source: over-long comment blocks, code syntax quoted in comments, and shouted words. Reasoning belongs in a notes or spike doc under `notes_dir`, not in the code.
 
@@ -408,8 +422,8 @@ Comment hygiene on agent-generated code. It rejects the tells of a model narrati
 - **File type decides what counts as a comment.** The `comment_markers` table maps an extension to that language's line-comment markers: `#` for Python and shell, `//` for C-likes, `--` for SQL and Lua, `;` for Lisps. A language with no line comment maps to an empty list, so a CSS `#header` is a selector, and a `#` line in a `.js` file is not a comment either. Unlisted types fall back to `unknown_markers`.
 - **No code in comments.** A comment matching a `syntax_rules` regex (a call like `foo(`, a shell or make sigil, an operator, braces) is rejected; describe it in prose.
 - **No shouting.** An all-caps word used for emphasis is rejected; a real global or env-var keeps its underscores and passes, and acronyms live in `shout_ok`. This rule is *not* waived for documentation, because prose a human reads does not shout.
-- **Scope.** Out: extensions in `prose_exts` (`md`, `markdown`, `mdx`, `rst`, `txt`, `adoc`, `org`), anything under a `prose_dirs` subtree (`docs/`), and the `notes_dir`. In: an iso tree under the notes dir, which holds code bound for core, so the promoted diff matches what core accepts. Markdown belongs to [Technical Writer](#technical-writer) instead.
-- **Shell writes closed off.** Enabling `hyg` also activates [Robot Accountability](#robot-accountability), since this discipline sees only Edit and Write; without it, a `sed -i` or a heredoc would write comments it never reads.
+- **Scope.** Out: extensions in `prose_exts` (`md`, `markdown`, `mdx`, `rst`, `txt`, `adoc`, `org`), anything under a `prose_dirs` subtree (`docs/`), and the `notes_dir`. In: an iso tree under the notes dir, which holds code bound for core, so the promoted diff matches what core accepts. Markdown belongs to [Technical Writer](#techwrite) instead.
+- **Shell writes closed off.** Enabling `hyg` also activates [Robot Accountability](#racc), since this discipline sees only Edit and Write; without it, a `sed -i` or a heredoc would write comments it never reads.
 - **Escape hatch:** export `CSOP_HYG=off`.
 
 **Awareness.** The pre-turn `nudge` states the rule in one paragraph at the top of
@@ -419,7 +433,7 @@ then a tail assembled from only the rules that fired. There is no post-turn
 `reminder`: reminders are for follow-up work a turn leaves behind, and a hygiene
 violation is refused outright rather than deferred.
 
-**Config** (project-overridable; see [Configuration layering](#configuration-layering))
+**Config** (project-overridable; see [Configuration Layering](#config))
 
 - `max_comment_lines` / `doc_max_comment_lines`: the two budgets (default 1 and 6).
 - `doc_prefixes` / `doc_regions`: what counts as documentation rather than a code comment.
@@ -429,6 +443,7 @@ violation is refused outright rather than deferred.
 - `notes_dir`: where reasoning should go instead (default `scratch/`).
 - `action`: enforcement strength (default `block`).
 
+<a id="techwrite"></a>
 ### Technical Writer
 
 `techwrite` · opt-in · enable with `/sop enable techwrite` (implies `hyg`, and `racc` through it)
@@ -456,13 +471,14 @@ example. The enforcement half checks added text.
 
 -------------------------------------------
 
-## Configuration layering
+<a id="config"></a>
+## Configuration Layering
 
 A discipline's identity lives in code; its behavior is tunable in three layers,
 each overriding the one before it.
 
 1. **Code default**: the class attribute in `hooks/disciplines.py`.
-2. **Project**: `.claude/csop.json`, keyed by codename.
+2. **Project**: `.claude/csop.json`, keyed by codename. Start from the annotated template at [`docs/csop.example.json`](docs/csop.example.json).
 3. **Current stage**: the `stages` block's `disciplines` object for whichever stage is current, so a rule can be strict in one phase and relaxed in another.
 
 Only the properties a discipline lists in `overridable` can be set; a name or
@@ -498,6 +514,7 @@ Note the two senses of the word. `/promote` is navigation and works regardless;
 
 -------------------------------------------
 
+<a id="abstractions"></a>
 ## Abstractions 
 
 ### Modeline
@@ -548,7 +565,7 @@ Each surface renders `systemMessage` its own way and the hook cannot influence i
 The CLI prints the box inline. Recent desktop builds put it in a default-collapsed
 widget labelled "Claude Code notice", so it is one click away instead of on screen.
 
-### Status line (opt-in, CLI only)
+### Status Line (Opt-In, CLI Only)
 
 `csop-statusline.py` renders a one-line summary through Claude Code's
 `statusLine` setting instead of a `Stop` hook, so it gets real ANSI color and a
@@ -585,6 +602,7 @@ Claude Code keeps out of git and which takes precedence over both the shared
 
 Point the path at wherever the CSOP checkout lives in the project.
 
+<a id="misc"></a>
 ## Misc Notes 
 
 ### Compatibility
@@ -592,11 +610,11 @@ Point the path at wherever the CSOP checkout lives in the project.
 Needs Claude Code **v2.1.196+**: slash commands resolve `csop.py` through `${CLAUDE_PROJECT_DIR}`, which a command body substitutes only on 2.1.196+ (`make install` enforces this).
 Hooks and the `python3` (stdlib-only) machinery run on any version.
 
-### Self-protection
+### Self-Protection
 
 CSOP's own hook code under `hooks/` is read-only in a consumer project: an always-on gate denies Edit/Write of the vendored plugin copy, so fixes go upstream in the `claude-SOP` repo and reach the client by a submodule update. It is inert in the plugin's own repo. Escape hatch: `CSOP_SELFPROTECT=off`.
 
-### Runtime / dependencies
+### Runtime / Dependencies
 
 Hooks are **stdlib-only** by policy. A plugin has no runtime-dependency
 mechanism: a hook is a command the harness runs through the host shell, using
